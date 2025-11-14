@@ -56,8 +56,8 @@ public class ChatCommands(
             // Build chat history
             var chatHistory = await llmService.BuildChatHistoryAsync(userId, channelId, message);
 
-            // Show typing indicator (via followup)
-            var thinkingMessage = await FollowupAsync("🤔 正在思考中...");
+            // Show thinking message in the deferred response
+            await ModifyOriginalResponseAsync(msg => msg.Content = "💬 正在思考中...");
 
             // Get LLM response
             var (response, promptTokens, completionTokens) = await llmService.GetChatCompletionAsync(chatHistory);
@@ -87,9 +87,6 @@ public class ChatCommands(
                 Timestamp = DateTime.UtcNow
             });
 
-            // Delete thinking message
-            await thinkingMessage.DeleteAsync();
-
             // Split response if too long (Discord limit is 2000 characters per message)
             if (response.Length <= 1900)
             {
@@ -101,7 +98,11 @@ public class ChatCommands(
                     .WithFooter($"使用 {totalTokens:N0} tokens | 今日已使用 {used + totalTokens:N0} / {limit:N0}")
                     .Build();
 
-                await FollowupAsync(embed: embed);
+                await ModifyOriginalResponseAsync(msg =>
+                {
+                    msg.Content = null; // Clear the "thinking" text
+                    msg.Embed = embed;
+                });
             }
             else
             {
@@ -126,7 +127,19 @@ public class ChatCommands(
                         embedBuilder.WithFooter($"使用 {totalTokens:N0} tokens | 今日已使用 {used + totalTokens:N0} / {limit:N0}");
                     }
 
-                    await FollowupAsync(embed: embedBuilder.Build());
+                    // First chunk updates the original deferred message, subsequent chunks use followup
+                    if (i == 0)
+                    {
+                        await ModifyOriginalResponseAsync(msg =>
+                        {
+                            msg.Content = null; // Clear the "thinking" text
+                            msg.Embed = embedBuilder.Build();
+                        });
+                    }
+                    else
+                    {
+                        await FollowupAsync(embed: embedBuilder.Build());
+                    }
                 }
             }
 
