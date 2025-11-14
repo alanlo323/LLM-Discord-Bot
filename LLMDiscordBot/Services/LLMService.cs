@@ -5,6 +5,7 @@ using Microsoft.Extensions.Options;
 using LLMDiscordBot.Configuration;
 using LLMDiscordBot.Data;
 using Serilog;
+using SharpToken;
 
 namespace LLMDiscordBot.Services;
 
@@ -18,6 +19,7 @@ public class LLMService
     private readonly ILogger logger;
     private readonly LLMConfig config;
     private readonly IRepository repository;
+    private readonly GptEncoding? tokenEncoding;
 
     public LLMService(
         IOptions<LLMConfig> config,
@@ -39,6 +41,19 @@ public class LLMService
 
         this.kernel = builder.Build();
         this.chatService = this.kernel.GetRequiredService<IChatCompletionService>();
+
+        // Initialize SharpToken encoding for accurate token counting
+        try
+        {
+            // Use cl100k_base encoding (GPT-4, GPT-3.5-turbo, and most modern models)
+            this.tokenEncoding = GptEncoding.GetEncoding("cl100k_base");
+            this.logger.Information("SharpToken encoding initialized successfully");
+        }
+        catch (Exception ex)
+        {
+            this.logger.Warning(ex, "Failed to initialize SharpToken encoding, will use estimation fallback");
+            this.tokenEncoding = null;
+        }
 
         this.logger.Information("LLM Service initialized with endpoint: {Endpoint}", this.config.ApiEndpoint);
     }
@@ -154,6 +169,129 @@ public class LLMService
         {
             logger.Error(ex, "Error getting chat completion from LLM");
             throw;
+        }
+    }
+
+    /// <summary>
+    /// Get chat completion from LLM with streaming support
+    /// </summary>
+    public async IAsyncEnumerable<(string content, int? promptTokens, int? completionTokens)> GetChatCompletionStreamingAsync(
+        Microsoft.SemanticKernel.ChatCompletion.ChatHistory chatHistory,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        int? promptTokens = null;
+        int? completionTokens = null;
+
+        try
+        {
+            // Get settings from database if available
+            var modelSetting = await repository.GetSettingAsync("Model");
+            var temperatureSetting = await repository.GetSettingAsync("Temperature");
+            var maxTokensSetting = await repository.GetSettingAsync("MaxTokens");
+
+            var temperature = double.TryParse(temperatureSetting, out var temp) ? temp : config.Temperature;
+            var maxTokens = int.TryParse(maxTokensSetting, out var max) ? max : config.MaxTokens;
+
+            var executionSettings = new OpenAIPromptExecutionSettings
+            {
+                Temperature = temperature,
+                MaxTokens = maxTokens
+            };
+
+            logger.Debug("Sending streaming request to LLM with {MessageCount} messages", chatHistory.Count);
+
+            await foreach (var message in chatService.GetStreamingChatMessageContentsAsync(
+                chatHistory,
+                executionSettings,
+                kernel,
+                cancellationToken))
+            {
+                // Try to extract token usage from metadata if available
+                if (message.Metadata != null && message.Metadata.TryGetValue("Usage", out var usageObj))
+                {
+                    var usageDict = usageObj as IDictionary<string, object>;
+                    if (usageDict != null)
+                    {
+                        if (usageDict.TryGetValue("prompt_tokens", out var pt))
+                            promptTokens = Convert.ToInt32(pt);
+                        else if (usageDict.TryGetValue("PromptTokens", out var pt2))
+                            promptTokens = Convert.ToInt32(pt2);
+
+                        if (usageDict.TryGetValue("completion_tokens", out var ct))
+                            completionTokens = Convert.ToInt32(ct);
+                        else if (usageDict.TryGetValue("CompletionTokens", out var ct2))
+                            completionTokens = Convert.ToInt32(ct2);
+                    }
+                    else if (usageObj != null)
+                    {
+                        var usageType = usageObj.GetType();
+                        
+                        var inputTokenProp = usageType.GetProperty("InputTokenCount") 
+                            ?? usageType.GetProperty("PromptTokens")
+                            ?? usageType.GetProperty("prompt_tokens");
+                        if (inputTokenProp != null)
+                        {
+                            var value = inputTokenProp.GetValue(usageObj);
+                            if (value != null)
+                                promptTokens = Convert.ToInt32(value);
+                        }
+                        
+                        var outputTokenProp = usageType.GetProperty("OutputTokenCount")
+                            ?? usageType.GetProperty("CompletionTokens")
+                            ?? usageType.GetProperty("completion_tokens");
+                        if (outputTokenProp != null)
+                        {
+                            var value = outputTokenProp.GetValue(usageObj);
+                            if (value != null)
+                                completionTokens = Convert.ToInt32(value);
+                        }
+                    }
+                }
+
+                yield return (message.Content ?? "", promptTokens, completionTokens);
+            }
+
+            logger.Information("LLM streaming response completed. Prompt tokens: {PromptTokens}, Completion tokens: {CompletionTokens}",
+                promptTokens ?? 0, completionTokens ?? 0);
+        }
+        finally
+        {
+            // Ensure final token counts are logged
+            if (promptTokens.HasValue || completionTokens.HasValue)
+            {
+                logger.Debug("Final token counts - Prompt: {PromptTokens}, Completion: {CompletionTokens}", 
+                    promptTokens ?? 0, completionTokens ?? 0);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Calculate accurate token count using SharpToken
+    /// </summary>
+    public int CalculateTokenCount(string text)
+    {
+        if (string.IsNullOrEmpty(text))
+            return 0;
+
+        try
+        {
+            if (tokenEncoding != null)
+            {
+                // Use SharpToken for accurate counting
+                var tokens = tokenEncoding.Encode(text);
+                return tokens.Count;
+            }
+            else
+            {
+                // Fallback to estimation if SharpToken is not available
+                logger.Debug("Using fallback estimation for token count");
+                return EstimateTokenCount(text);
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.Warning(ex, "Error calculating token count, using estimation fallback");
+            return EstimateTokenCount(text);
         }
     }
 

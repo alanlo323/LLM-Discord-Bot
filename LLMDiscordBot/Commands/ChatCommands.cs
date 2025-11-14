@@ -56,12 +56,89 @@ public class ChatCommands(
             // Build chat history
             var chatHistory = await llmService.BuildChatHistoryAsync(userId, channelId, message);
 
-            // Show thinking message in the deferred response
-            await ModifyOriginalResponseAsync(msg => msg.Content = "💬 正在思考中...");
+            // Stream LLM response with real-time updates
+            var responseBuilder = new System.Text.StringBuilder();
+            var lastUpdateTime = DateTime.UtcNow;
+            int? promptTokens = null;
+            int? completionTokens = null;
+            var hasContent = false;
 
-            // Get LLM response
-            var (response, promptTokens, completionTokens) = await llmService.GetChatCompletionAsync(chatHistory);
-            var totalTokens = promptTokens + completionTokens;
+            await foreach (var (content, pTokens, cTokens) in llmService.GetChatCompletionStreamingAsync(chatHistory))
+            {
+                if (!string.IsNullOrEmpty(content))
+                {
+                    responseBuilder.Append(content);
+                    hasContent = true;
+
+                    // Update token counts if available
+                    if (pTokens.HasValue) promptTokens = pTokens.Value;
+                    if (cTokens.HasValue) completionTokens = cTokens.Value;
+
+                    // Update Discord message every 1 second
+                    var now = DateTime.UtcNow;
+                    if ((now - lastUpdateTime).TotalSeconds >= 1.0)
+                    {
+                        lastUpdateTime = now;
+                        var currentContent = responseBuilder.ToString();
+
+                        // Truncate if too long for streaming display (Discord embed limit)
+                        var displayContent = currentContent.Length > 1900 
+                            ? currentContent.Substring(0, 1900) + "..." 
+                            : currentContent;
+
+                        var streamingEmbed = new EmbedBuilder()
+                            .WithColor(Color.Blue)
+                            .WithAuthor(Context.User.Username, Context.User.GetAvatarUrl())
+                            .WithTitle($"💬 {(message.Length > 100 ? message.Substring(0, 100) + "..." : message)}")
+                            .WithDescription(displayContent)
+                            .WithFooter("正在生成回應...")
+                            .Build();
+
+                        try
+                        {
+                            await ModifyOriginalResponseAsync(msg =>
+                            {
+                                msg.Content = null;
+                                msg.Embed = streamingEmbed;
+                            });
+                        }
+                        catch (Exception ex)
+                        {
+                            // Log but don't stop streaming if update fails
+                            logger.Warning(ex, "Failed to update streaming message");
+                        }
+                    }
+                }
+            }
+
+            var response = responseBuilder.ToString();
+
+            // If no content was received, handle error
+            if (!hasContent || string.IsNullOrEmpty(response))
+            {
+                logger.Warning("No content received from LLM streaming");
+                response = "抱歉，無法生成回應。請稍後再試。";
+                // Use accurate calculation if no token data available
+                promptTokens = llmService.CalculateTokenCount(message);
+                completionTokens = 0;
+            }
+            else
+            {
+                // Calculate tokens accurately if API didn't return usage info
+                if (!promptTokens.HasValue)
+                {
+                    promptTokens = llmService.CalculateTokenCount(message);
+                    logger.Information("Calculated prompt tokens (API didn't provide): {Tokens}", promptTokens.Value);
+                }
+
+                if (!completionTokens.HasValue)
+                {
+                    completionTokens = llmService.CalculateTokenCount(response);
+                    logger.Information("Calculated completion tokens (API didn't provide): {Tokens}", completionTokens.Value);
+                }
+            }
+
+            var totalTokens = (promptTokens ?? 0) + (completionTokens ?? 0);
 
             // Record token usage
             await tokenControl.RecordTokenUsageAsync(userId, totalTokens);
@@ -73,7 +150,7 @@ public class ChatCommands(
                 ChannelId = channelId,
                 Role = "user",
                 Content = message,
-                TokenCount = promptTokens,
+                TokenCount = promptTokens ?? 0,
                 Timestamp = DateTime.UtcNow
             });
 
@@ -83,10 +160,11 @@ public class ChatCommands(
                 ChannelId = channelId,
                 Role = "assistant",
                 Content = response,
-                TokenCount = completionTokens,
+                TokenCount = completionTokens ?? 0,
                 Timestamp = DateTime.UtcNow
             });
 
+            // Update final message with complete response
             // Split response if too long (Discord limit is 2000 characters per message)
             if (response.Length <= 1900)
             {
