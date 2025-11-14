@@ -34,12 +34,14 @@ public class CommandHandlerService
         // Hook events
         client.InteractionCreated += HandleInteractionAsync;
         interactionService.SlashCommandExecuted += SlashCommandExecutedAsync;
-        client.Ready += RegisterCommandsAsync;
 
         logger.Information("Command handler service initialized");
     }
 
-    private async Task RegisterCommandsAsync()
+    /// <summary>
+    /// Register slash commands. This should be called after the client is ready.
+    /// </summary>
+    public async Task RegisterCommandsAsync()
     {
         try
         {

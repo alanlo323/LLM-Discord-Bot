@@ -2,6 +2,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Configuration;
 using Microsoft.EntityFrameworkCore;
+using Discord;
 using Discord.WebSocket;
 using Serilog;
 using LLMDiscordBot.Configuration;
@@ -59,7 +60,7 @@ class Program
                 var configuration = context.Configuration;
 
                 // Register configuration
-                services.Configure<DiscordConfig>(configuration.GetSection("Discord"));
+                services.Configure<Configuration.DiscordConfig>(configuration.GetSection("Discord"));
                 services.Configure<LLMConfig>(configuration.GetSection("LLM"));
                 services.Configure<TokenLimitsConfig>(configuration.GetSection("TokenLimits"));
                 services.Configure<DatabaseConfig>(configuration.GetSection("Database"));
@@ -67,8 +68,20 @@ class Program
                 // Register Serilog logger
                 services.AddSingleton(Log.Logger);
 
-                // Register Discord client
-                services.AddSingleton<DiscordSocketClient>();
+                // Register Discord client with configuration
+                services.AddSingleton<DiscordSocketClient>(provider =>
+                {
+                    var socketConfig = new DiscordSocketConfig
+                    {
+                        GatewayIntents = GatewayIntents.Guilds |
+                                        GatewayIntents.GuildMessages |
+                                        GatewayIntents.DirectMessages |
+                                        GatewayIntents.MessageContent,
+                        AlwaysDownloadUsers = false,
+                        MessageCacheSize = 100
+                    };
+                    return new DiscordSocketClient(socketConfig);
+                });
 
                 // Register database context
                 var connectionString = configuration.GetSection("Database:ConnectionString").Value 

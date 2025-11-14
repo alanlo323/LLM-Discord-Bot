@@ -18,25 +18,15 @@ public class DiscordBotService : IHostedService
     private readonly CommandHandlerService commandHandler;
 
     public DiscordBotService(
+        DiscordSocketClient client,
         IOptions<Configuration.DiscordConfig> discordConfig,
         ILogger logger,
         CommandHandlerService commandHandler)
     {
+        this.client = client;
         this.config = discordConfig.Value;
         this.logger = logger;
         this.commandHandler = commandHandler;
-
-        var socketConfig = new DiscordSocketConfig
-        {
-            GatewayIntents = GatewayIntents.Guilds |
-                            GatewayIntents.GuildMessages |
-                            GatewayIntents.DirectMessages |
-                            GatewayIntents.MessageContent,
-            AlwaysDownloadUsers = false,
-            MessageCacheSize = 100
-        };
-
-        this.client = new DiscordSocketClient(socketConfig);
 
         // Event handlers
         this.client.Log += LogAsync;
@@ -56,9 +46,11 @@ public class DiscordBotService : IHostedService
         }
 
         await client.LoginAsync(TokenType.Bot, config.Token);
-        await client.StartAsync();
-
+        
+        // Initialize command handler BEFORE starting the client
         await commandHandler.InitializeAsync(client);
+        
+        await client.StartAsync();
 
         logger.Information("Discord Bot Service started successfully");
     }
@@ -95,5 +87,8 @@ public class DiscordBotService : IHostedService
             client.CurrentUser.Username, client.CurrentUser.Discriminator);
         
         await client.SetGameAsync("與 LLM 聊天 | /chat", type: ActivityType.Playing);
+        
+        // Register slash commands after client is fully ready
+        await commandHandler.RegisterCommandsAsync();
     }
 }
