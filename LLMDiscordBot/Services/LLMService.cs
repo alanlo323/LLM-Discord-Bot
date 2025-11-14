@@ -84,15 +84,61 @@ public class LLMService
                 if (lastMessage.Metadata != null &&
                     lastMessage.Metadata.TryGetValue("Usage", out var usageObj))
                 {
+                    logger.Debug("Usage object type: {Type}", usageObj?.GetType().FullName ?? "null");
+                    
                     // Try to parse usage information
                     var usageDict = usageObj as IDictionary<string, object>;
                     if (usageDict != null)
                     {
-                        if (usageDict.TryGetValue("PromptTokens", out var pt))
+                        // Dictionary approach (for some API implementations)
+                        if (usageDict.TryGetValue("prompt_tokens", out var pt))
                             promptTokens = Convert.ToInt32(pt);
-                        if (usageDict.TryGetValue("CompletionTokens", out var ct))
+                        else if (usageDict.TryGetValue("PromptTokens", out var pt2))
+                            promptTokens = Convert.ToInt32(pt2);
+
+                        if (usageDict.TryGetValue("completion_tokens", out var ct))
                             completionTokens = Convert.ToInt32(ct);
+                        else if (usageDict.TryGetValue("CompletionTokens", out var ct2))
+                            completionTokens = Convert.ToInt32(ct2);
                     }
+                    else if (usageObj != null)
+                    {
+                        // Use reflection to get properties (for OpenAI.Chat.ChatTokenUsage and similar types)
+                        var usageType = usageObj.GetType();
+                        
+                        // Try to get InputTokenCount or PromptTokens
+                        var inputTokenProp = usageType.GetProperty("InputTokenCount") 
+                            ?? usageType.GetProperty("PromptTokens")
+                            ?? usageType.GetProperty("prompt_tokens");
+                        if (inputTokenProp != null)
+                        {
+                            var value = inputTokenProp.GetValue(usageObj);
+                            if (value != null)
+                                promptTokens = Convert.ToInt32(value);
+                        }
+                        
+                        // Try to get OutputTokenCount or CompletionTokens
+                        var outputTokenProp = usageType.GetProperty("OutputTokenCount")
+                            ?? usageType.GetProperty("CompletionTokens")
+                            ?? usageType.GetProperty("completion_tokens");
+                        if (outputTokenProp != null)
+                        {
+                            var value = outputTokenProp.GetValue(usageObj);
+                            if (value != null)
+                                completionTokens = Convert.ToInt32(value);
+                        }
+                        
+                        logger.Debug("Token extraction via reflection - Prompt: {PromptTokens}, Completion: {CompletionTokens}", 
+                            promptTokens, completionTokens);
+                    }
+                    else
+                    {
+                        logger.Warning("Usage metadata is null");
+                    }
+                }
+                else
+                {
+                    logger.Warning("No Usage metadata found in LLM response");
                 }
 
                 var responseContent = string.Join("", result.Select(r => r.Content));

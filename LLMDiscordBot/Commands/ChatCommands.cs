@@ -95,6 +95,8 @@ public class ChatCommands(
             {
                 var embed = new EmbedBuilder()
                     .WithColor(Color.Blue)
+                    .WithAuthor(Context.User.Username, Context.User.GetAvatarUrl())
+                    .WithTitle($"💬 {(message.Length > 100 ? message.Substring(0, 100) + "..." : message)}")
                     .WithDescription(response)
                     .WithFooter($"使用 {totalTokens:N0} tokens | 今日已使用 {used + totalTokens:N0} / {limit:N0}")
                     .Build();
@@ -110,6 +112,14 @@ public class ChatCommands(
                     var embedBuilder = new EmbedBuilder()
                         .WithColor(Color.Blue)
                         .WithDescription(chunks[i]);
+
+                    // Add user info and question only to first chunk
+                    if (i == 0)
+                    {
+                        embedBuilder
+                            .WithAuthor(Context.User.Username, Context.User.GetAvatarUrl())
+                            .WithTitle($"💬 {(message.Length > 100 ? message.Substring(0, 100) + "..." : message)}");
+                    }
 
                     if (i == chunks.Count - 1)
                     {
