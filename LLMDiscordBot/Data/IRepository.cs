@@ -26,5 +26,16 @@ public interface IRepository
     Task<string?> GetSettingAsync(string key);
     Task SetSettingAsync(string key, string value, string? updatedBy = null);
     Task<Dictionary<string, string>> GetAllSettingsAsync();
+
+    // Global statistics operations
+    Task<int> GetTotalUsersCountAsync();
+    Task<int> GetBlockedUsersCountAsync();
+    Task<int> GetActiveUsersTodayCountAsync(DateTime today);
+    Task<long> GetTotalTokenUsageAsync();
+    Task<long> GetTotalMessageCountAsync();
+    Task<int> GetTodayTokenUsageAsync(DateTime today);
+    Task<int> GetTodayMessageCountAsync(DateTime today);
+    Task<List<TopUser>> GetTopUsersByTokenUsageAsync(DateTime date, int count);
+    Task<List<DailyTrend>> GetDailyTokenUsageTrendAsync(DateTime startDate, DateTime endDate);
 }
 

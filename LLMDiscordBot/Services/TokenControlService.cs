@@ -9,21 +9,12 @@ namespace LLMDiscordBot.Services;
 /// <summary>
 /// Service for managing token usage and limits
 /// </summary>
-public class TokenControlService
+public class TokenControlService(
+    IRepository repository,
+    IOptions<TokenLimitsConfig> tokenConfig,
+    ILogger logger)
 {
-    private readonly IRepository repository;
-    private readonly ILogger logger;
-    private readonly TokenLimitsConfig config;
-
-    public TokenControlService(
-        IRepository repository,
-        IOptions<TokenLimitsConfig> tokenConfig,
-        ILogger logger)
-    {
-        this.repository = repository;
-        this.config = tokenConfig.Value;
-        this.logger = logger;
-    }
+    private readonly TokenLimitsConfig config = tokenConfig.Value;
 
     /// <summary>
     /// Check if user has enough tokens remaining for today

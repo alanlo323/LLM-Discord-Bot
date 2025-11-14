@@ -9,21 +9,11 @@ namespace LLMDiscordBot.Commands;
 /// <summary>
 /// User commands for viewing personal stats and history
 /// </summary>
-public class UserCommands : InteractionModuleBase<SocketInteractionContext>
+public class UserCommands(
+    TokenControlService tokenControl,
+    IRepository repository,
+    ILogger logger) : InteractionModuleBase<SocketInteractionContext>
 {
-    private readonly TokenControlService tokenControl;
-    private readonly IRepository repository;
-    private readonly ILogger logger;
-
-    public UserCommands(
-        TokenControlService tokenControl,
-        IRepository repository,
-        ILogger logger)
-    {
-        this.tokenControl = tokenControl;
-        this.repository = repository;
-        this.logger = logger;
-    }
 
     [SlashCommand("mystats", "查看您的使用統計")]
     public async Task MyStatsAsync()

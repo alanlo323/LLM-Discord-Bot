@@ -2,6 +2,7 @@ using Discord;
 using Discord.Interactions;
 using LLMDiscordBot.Services;
 using LLMDiscordBot.Data;
+using LLMDiscordBot.Models;
 using Serilog;
 
 namespace LLMDiscordBot.Commands;
@@ -11,21 +12,11 @@ namespace LLMDiscordBot.Commands;
 /// </summary>
 [Group("admin", "管理員命令")]
 [DefaultMemberPermissions(GuildPermission.Administrator)]
-public class AdminCommands : InteractionModuleBase<SocketInteractionContext>
+public class AdminCommands(
+    TokenControlService tokenControl,
+    IRepository repository,
+    ILogger logger) : InteractionModuleBase<SocketInteractionContext>
 {
-    private readonly TokenControlService tokenControl;
-    private readonly IRepository repository;
-    private readonly ILogger logger;
-
-    public AdminCommands(
-        TokenControlService tokenControl,
-        IRepository repository,
-        ILogger logger)
-    {
-        this.tokenControl = tokenControl;
-        this.repository = repository;
-        this.logger = logger;
-    }
 
     #region User Management
 
@@ -360,24 +351,127 @@ public class AdminCommands : InteractionModuleBase<SocketInteractionContext>
     {
         try
         {
-            // This would require additional repository methods for global stats
-            // For now, return a placeholder
+            await DeferAsync(); // This might take a while
+
+            var today = DateTime.UtcNow;
+            
+            // Gather all statistics
+            var totalUsers = await repository.GetTotalUsersCountAsync();
+            var blockedUsers = await repository.GetBlockedUsersCountAsync();
+            var activeUsersToday = await repository.GetActiveUsersTodayCountAsync(today);
+            
+            var totalTokenUsage = await repository.GetTotalTokenUsageAsync();
+            var totalMessageCount = await repository.GetTotalMessageCountAsync();
+            
+            var todayTokenUsage = await repository.GetTodayTokenUsageAsync(today);
+            var todayMessageCount = await repository.GetTodayMessageCountAsync(today);
+            
+            var topUsers = await repository.GetTopUsersByTokenUsageAsync(today, 5);
+            
+            var last7DaysStart = today.AddDays(-6).Date;
+            var last30DaysStart = today.AddDays(-29).Date;
+            
+            var last7DaysTrend = await repository.GetDailyTokenUsageTrendAsync(last7DaysStart, today);
+            var last30DaysTrend = await repository.GetDailyTokenUsageTrendAsync(last30DaysStart, today);
+            
+            // Calculate averages
+            var avgTokensPerUser = totalUsers > 0 ? (double)totalTokenUsage / totalUsers : 0;
+            var avgTokensPerMessage = totalMessageCount > 0 ? (double)totalTokenUsage / totalMessageCount : 0;
+            
+            var last7DaysTotal = last7DaysTrend.Sum(t => (long)t.TokensUsed);
+            var last30DaysTotal = last30DaysTrend.Sum(t => (long)t.TokensUsed);
+            var last7DaysAverage = last7DaysTrend.Count > 0 ? (double)last7DaysTotal / last7DaysTrend.Count : 0;
+            var last30DaysAverage = last30DaysTrend.Count > 0 ? (double)last30DaysTotal / last30DaysTrend.Count : 0;
+
+            // Build the embed
             var embed = new EmbedBuilder()
                 .WithColor(Color.Blue)
-                .WithTitle("📊 全域統計")
-                .WithDescription("全域統計功能開發中...")
-                .WithCurrentTimestamp()
-                .Build();
+                .WithTitle("📊 全域使用統計")
+                .WithDescription("Bot 的完整使用統計資訊")
+                .WithCurrentTimestamp();
 
-            await RespondAsync(embed: embed);
+            // Basic Statistics
+            embed.AddField("👥 用戶統計", 
+                $"總用戶數：**{totalUsers:N0}**\n" +
+                $"今日活躍：**{activeUsersToday:N0}**\n" +
+                $"封鎖用戶：**{blockedUsers:N0}**",
+                inline: true);
+
+            // Today's Activity
+            embed.AddField("📅 今日活動",
+                $"Token 使用：**{todayTokenUsage:N0}**\n" +
+                $"訊息數量：**{todayMessageCount:N0}**\n" +
+                $"平均每訊息：**{(todayMessageCount > 0 ? (double)todayTokenUsage / todayMessageCount : 0):N0}** tokens",
+                inline: true);
+
+            // Historical Totals
+            embed.AddField("📈 歷史總計",
+                $"總 Token 數：**{totalTokenUsage:N0}**\n" +
+                $"總訊息數：**{totalMessageCount:N0}**\n" +
+                $"平均每用戶：**{avgTokensPerUser:N0}** tokens",
+                inline: true);
+
+            // 7-Day Trend Summary
+            embed.AddField("📊 近 7 天趨勢",
+                $"總使用量：**{last7DaysTotal:N0}** tokens\n" +
+                $"日均使用：**{last7DaysAverage:N0}** tokens\n" +
+                $"總訊息數：**{last7DaysTrend.Sum(t => t.MessageCount):N0}**",
+                inline: true);
+
+            // 30-Day Trend Summary
+            embed.AddField("📊 近 30 天趨勢",
+                $"總使用量：**{last30DaysTotal:N0}** tokens\n" +
+                $"日均使用：**{last30DaysAverage:N0}** tokens\n" +
+                $"總訊息數：**{last30DaysTrend.Sum(t => t.MessageCount):N0}**",
+                inline: true);
+
+            // Top Users Today
+            if (topUsers.Any())
+            {
+                var topUsersText = string.Join("\n", topUsers.Select(u =>
+                    $"{u.Rank}. <@{u.UserId}>: **{u.TokensUsed:N0}** tokens ({u.MessageCount} 則訊息)"));
+                embed.AddField("🏆 今日使用排行 (Top 5)", topUsersText, inline: false);
+            }
+            else
+            {
+                embed.AddField("🏆 今日使用排行 (Top 5)", "今日尚無使用記錄", inline: false);
+            }
+
+            // 7-Day Trend Chart (Simple text representation)
+            var trendChart7Days = CreateSimpleTrendChart(last7DaysTrend.TakeLast(7).ToList());
+            embed.AddField("📉 近 7 天使用趨勢", trendChart7Days, inline: false);
+
+            await FollowupAsync(embed: embed.Build());
 
             logger.Information("Admin {AdminId} viewed global stats", Context.User.Id);
         }
         catch (Exception ex)
         {
             logger.Error(ex, "Error viewing stats");
-            await RespondAsync("發生錯誤，請稍後再試。", ephemeral: true);
+            await FollowupAsync("發生錯誤，請稍後再試。", ephemeral: true);
         }
+    }
+
+    /// <summary>
+    /// Create a simple text-based trend chart
+    /// </summary>
+    private string CreateSimpleTrendChart(List<DailyTrend> trends)
+    {
+        if (!trends.Any())
+            return "無資料";
+
+        var maxTokens = trends.Max(t => t.TokensUsed);
+        var lines = new List<string>();
+
+        foreach (var trend in trends)
+        {
+            var barLength = maxTokens > 0 ? (int)((double)trend.TokensUsed / maxTokens * 20) : 0;
+            var bar = new string('█', Math.Max(1, barLength));
+            var dateStr = trend.Date.ToString("MM/dd");
+            lines.Add($"`{dateStr}` {bar} {trend.TokensUsed:N0} tokens");
+        }
+
+        return string.Join("\n", lines);
     }
 
     #endregion
