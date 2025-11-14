@@ -96,6 +96,7 @@ class Program
                 services.AddSingleton<CommandHandlerService>();
                 services.AddSingleton<LLMService>();
                 services.AddSingleton<TokenControlService>();
+                services.AddSingleton<UserRequestQueueService>();
 
                 // Register hosted services
                 services.AddHostedService<DiscordBotService>();

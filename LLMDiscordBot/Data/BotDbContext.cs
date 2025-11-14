@@ -33,7 +33,7 @@ public class BotDbContext : DbContext
         modelBuilder.Entity<TokenUsage>(entity =>
         {
             entity.HasKey(e => e.Id);
-            entity.HasIndex(e => new { e.UserId, e.Date });
+            entity.HasIndex(e => new { e.UserId, e.Date }).IsUnique();
             entity.HasOne(e => e.User)
                 .WithMany(u => u.TokenUsages)
                 .HasForeignKey(e => e.UserId)

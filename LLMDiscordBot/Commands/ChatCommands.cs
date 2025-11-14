@@ -15,6 +15,7 @@ public class ChatCommands(
     LLMService llmService,
     TokenControlService tokenControl,
     IRepository repository,
+    UserRequestQueueService requestQueue,
     ILogger logger) : InteractionModuleBase<SocketInteractionContext>
 {
 
@@ -23,14 +24,17 @@ public class ChatCommands(
         [Summary("message", "您想說的話")]
         string message)
     {
+        // Defer response as LLM might take time
+        await DeferAsync();
+
+        var userId = Context.User.Id;
+        var channelId = Context.Channel.Id;
+
+        // Acquire user-specific lock to serialize requests and prevent race conditions
+        using var userLock = await requestQueue.AcquireUserLockAsync(userId);
+
         try
         {
-            // Defer response as LLM might take time
-            await DeferAsync();
-
-            var userId = Context.User.Id;
-            var channelId = Context.Channel.Id;
-
             logger.Information("User {Username} ({UserId}) sent chat message in channel {ChannelId}",
                 Context.User.Username, userId, channelId);
 
@@ -171,7 +175,7 @@ public class ChatCommands(
                 var embed = new EmbedBuilder()
                     .WithColor(Color.Blue)
                     .WithAuthor(Context.User.Username, Context.User.GetAvatarUrl())
-                    .WithTitle($"💬 {(message.Length > 100 ? message.Substring(0, 100) + "..." : message)}")
+                    .WithTitle($"💬 {(message.Length > 100 ? string.Concat(message.AsSpan(0, 100), "...") : message)}")
                     .WithDescription(response)
                     .WithFooter($"使用 {totalTokens:N0} tokens | 今日已使用 {used + totalTokens:N0} / {limit:N0}")
                     .Build();

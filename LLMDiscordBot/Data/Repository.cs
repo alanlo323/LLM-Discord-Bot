@@ -61,30 +61,43 @@ public class Repository(BotDbContext context, ILogger logger) : IRepository
     public async Task AddTokenUsageAsync(ulong userId, int tokens, DateTime date)
     {
         var dateOnly = date.Date;
-        var existing = await context.TokenUsages
-            .FirstOrDefaultAsync(t => t.UserId == userId && t.Date == dateOnly);
 
-        if (existing != null)
+        // Use transaction to ensure atomic operation and prevent race conditions
+        await using var transaction = await context.Database.BeginTransactionAsync();
+        
+        try
         {
-            existing.TokensUsed += tokens;
-            existing.MessageCount++;
-            context.TokenUsages.Update(existing);
-        }
-        else
-        {
-            var usage = new TokenUsage
+            // Attempt atomic UPDATE first - this prevents read-modify-write race conditions
+            var rowsAffected = await context.Database.ExecuteSqlRawAsync(
+                @"UPDATE TokenUsages 
+                  SET TokensUsed = TokensUsed + {0}, MessageCount = MessageCount + 1 
+                  WHERE UserId = {1} AND Date = {2}",
+                tokens, userId, dateOnly);
+
+            // If no rows were affected, the record doesn't exist - INSERT it
+            if (rowsAffected == 0)
             {
-                UserId = userId,
-                Date = dateOnly,
-                TokensUsed = tokens,
-                MessageCount = 1,
-                CreatedAt = DateTime.UtcNow
-            };
-            context.TokenUsages.Add(usage);
-        }
+                var usage = new TokenUsage
+                {
+                    UserId = userId,
+                    Date = dateOnly,
+                    TokensUsed = tokens,
+                    MessageCount = 1,
+                    CreatedAt = DateTime.UtcNow
+                };
+                context.TokenUsages.Add(usage);
+                await context.SaveChangesAsync();
+            }
 
-        await context.SaveChangesAsync();
-        logger.Debug("Added {Tokens} tokens for user {UserId} on {Date}", tokens, userId, dateOnly);
+            await transaction.CommitAsync();
+            logger.Debug("Added {Tokens} tokens for user {UserId} on {Date}", tokens, userId, dateOnly);
+        }
+        catch (Exception ex)
+        {
+            await transaction.RollbackAsync();
+            logger.Error(ex, "Error adding token usage for user {UserId}", userId);
+            throw;
+        }
     }
 
     #endregion
