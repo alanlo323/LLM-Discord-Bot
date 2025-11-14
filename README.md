@@ -50,25 +50,27 @@ git clone <repository-url>
 cd "LLM Discord Bot"
 ```
 
-2. 編輯 `LLMDiscordBot/appsettings.json`：
-```json
-{
-  "Discord": {
-    "Token": "YOUR_DISCORD_BOT_TOKEN_HERE"
-  },
-  "LLM": {
-    "ApiEndpoint": "https://lmstudio.alanlo.org",
-    "Model": "default",
-    "Temperature": 0.7,
-    "MaxTokens": 2000,
-    "SystemPrompt": "You are a helpful AI assistant."
-  },
-  "TokenLimits": {
-    "DefaultDailyLimit": 100000,
-    "EnableLimits": true
-  }
-}
+2. 複製配置範本：
+```bash
+cd LLMDiscordBot
+cp appsettings.example.json appsettings.json
 ```
+
+3. 設定 Discord Bot Token（**推薦使用 User Secrets**）：
+```bash
+# 使用 User Secrets（開發環境推薦）
+dotnet user-secrets set "Discord:Token" "YOUR_DISCORD_BOT_TOKEN"
+
+# 或者直接編輯 appsettings.json（不推薦提交到 Git）
+```
+
+4. （可選）修改 LLM 設定（已預設為 `https://lmstudio.alanlo.org/v1`）：
+編輯 `appsettings.json` 中的 `LLM` 區段
+
+⚠️ **重要安全提醒**：
+- `appsettings.json` 已加入 `.gitignore`，不會被追蹤
+- 請使用 User Secrets 儲存敏感信息
+- 詳細說明請參考 [SECURITY.md](SECURITY.md)
 
 ### 3. 建置和執行
 

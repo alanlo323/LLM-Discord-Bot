@@ -63,8 +63,10 @@ Thumbs.db
 *~
 
 # Sensitive configuration
+appsettings.json
 appsettings.Development.json
 appsettings.Production.json
+!appsettings.example.json
 
 # User-specific files
 *.rsuser
