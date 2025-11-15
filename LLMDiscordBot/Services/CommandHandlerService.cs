@@ -2,13 +2,14 @@ using Discord;
 using Discord.WebSocket;
 using Discord.Interactions;
 using System.Reflection;
+using System.Text.RegularExpressions;
 using Serilog;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace LLMDiscordBot.Services;
 
 /// <summary>
-/// Service for handling Discord slash commands
+/// Service for handling Discord slash commands and message mentions
 /// </summary>
 public class CommandHandlerService
 {
@@ -33,6 +34,7 @@ public class CommandHandlerService
 
         // Hook events
         client.InteractionCreated += HandleInteractionAsync;
+        client.MessageReceived += HandleMessageReceivedAsync;
         interactionService.SlashCommandExecuted += SlashCommandExecutedAsync;
 
         logger.Information("Command handler service initialized");
@@ -96,6 +98,116 @@ public class CommandHandlerService
         }
 
         return Task.CompletedTask;
+    }
+
+    private async Task HandleMessageReceivedAsync(SocketMessage socketMessage)
+    {
+        // Ignore system messages
+        if (socketMessage is not SocketUserMessage message)
+            return;
+
+        // Ignore bot messages
+        if (message.Author.IsBot)
+            return;
+
+        // Check if bot is mentioned
+        if (!message.MentionedUsers.Any(u => u.Id == client?.CurrentUser?.Id))
+            return;
+
+        try
+        {
+            logger.Information("Bot mentioned by {Username} ({UserId}) in message: {Content}",
+                message.Author.Username, message.Author.Id, message.Content);
+
+            // Parse the message to extract reasoning effort and actual content
+            var (cleanedMessage, reasoningEffort) = ParseMessageContent(message.Content);
+
+            // Validate cleaned message
+            if (string.IsNullOrWhiteSpace(cleanedMessage))
+            {
+                await message.ReplyAsync("請提供訊息內容。");
+                return;
+            }
+
+            // Process the chat request using ChatProcessorService
+            using var scope = services.CreateScope();
+            var chatProcessor = scope.ServiceProvider.GetRequiredService<ChatProcessorService>();
+
+            var userId = message.Author.Id;
+            var channelId = message.Channel.Id;
+            var guildId = (message.Channel as SocketGuildChannel)?.Guild?.Id;
+            var username = message.Author.Username;
+            var avatarUrl = message.Author.GetAvatarUrl();
+
+            IUserMessage? currentMessage = null;
+
+            await chatProcessor.ProcessChatRequestAsync(
+                userId,
+                channelId,
+                guildId,
+                username,
+                avatarUrl,
+                cleanedMessage,
+                reasoningEffort,
+                // sendInitialResponse
+                async (content, embed) =>
+                {
+                    if (currentMessage == null)
+                    {
+                        currentMessage = await message.ReplyAsync(text: content, embed: embed);
+                    }
+                    return currentMessage;
+                },
+                // updateResponse
+                async (modifyAction) =>
+                {
+                    if (currentMessage != null)
+                    {
+                        await currentMessage.ModifyAsync(modifyAction);
+                    }
+                },
+                // sendFollowup
+                async (embed) =>
+                {
+                    return await message.Channel.SendMessageAsync(embed: embed);
+                }
+            );
+        }
+        catch (Exception ex)
+        {
+            logger.Error(ex, "Error handling message mention");
+            try
+            {
+                await message.ReplyAsync("處理您的請求時發生錯誤，請稍後再試。");
+            }
+            catch (Exception replyEx)
+            {
+                logger.Error(replyEx, "Failed to send error reply");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Parse message content to extract reasoning effort parameter and clean message
+    /// Format: @Bot [low|medium|high] your message here
+    /// </summary>
+    private (string cleanedMessage, string reasoningEffort) ParseMessageContent(string content)
+    {
+        // Remove bot mentions
+        var cleanedContent = Regex.Replace(content, @"<@!?\d+>", "").Trim();
+
+        // Extract reasoning effort if present
+        var reasoningMatch = Regex.Match(cleanedContent, @"\[(low|medium|high)\]", RegexOptions.IgnoreCase);
+        var reasoningEffort = "medium"; // default
+
+        if (reasoningMatch.Success)
+        {
+            reasoningEffort = reasoningMatch.Groups[1].Value.ToLower();
+            // Remove only the first matched reasoning effort tag from the message
+            cleanedContent = cleanedContent.Remove(reasoningMatch.Index, reasoningMatch.Length).Trim();
+        }
+
+        return (cleanedContent, reasoningEffort);
     }
 }
 
