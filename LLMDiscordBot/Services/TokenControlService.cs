@@ -67,7 +67,9 @@ public class TokenControlService(
         }
 
         var today = DateTime.UtcNow;
-        var usedToday = await repository.GetTodayTokenUsageAsync(userId, today);
+        var usedToday = guildId.HasValue 
+            ? await repository.GetUserTodayTokenUsageInGuildAsync(userId, guildId.Value, today)
+            : await repository.GetTodayTokenUsageAsync(userId, today);
         var remaining = effectiveLimit - usedToday;
 
         var allowed = remaining >= tokensNeeded;
@@ -98,7 +100,6 @@ public class TokenControlService(
     {
         var user = await repository.GetOrCreateUserAsync(userId, config.DefaultDailyLimit);
         var today = DateTime.UtcNow;
-        var usedToday = await repository.GetTodayTokenUsageAsync(userId, today);
 
         // Determine the effective daily limit
         int effectiveLimit = user.DailyTokenLimit;
@@ -111,6 +112,10 @@ public class TokenControlService(
                 effectiveLimit = Math.Min(effectiveLimit, guildSettings.DailyLimit.Value);
             }
         }
+
+        var usedToday = guildId.HasValue 
+            ? await repository.GetUserTodayTokenUsageInGuildAsync(userId, guildId.Value, today)
+            : await repository.GetTodayTokenUsageAsync(userId, today);
 
         return new UserStats
         {

@@ -58,6 +58,15 @@ public class Repository(BotDbContext context, ILogger logger) : IRepository
         return usage;
     }
 
+    public async Task<int> GetUserTodayTokenUsageInGuildAsync(ulong userId, ulong guildId, DateTime today)
+    {
+        var dateOnly = today.Date;
+        var usage = await context.TokenUsages
+            .Where(t => t.UserId == userId && t.GuildId == guildId && t.Date == dateOnly)
+            .SumAsync(t => (int?)t.TokensUsed) ?? 0;
+        return usage;
+    }
+
     public async Task AddTokenUsageAsync(ulong userId, int tokens, DateTime date, ulong? guildId = null)
     {
         var dateOnly = date.Date;

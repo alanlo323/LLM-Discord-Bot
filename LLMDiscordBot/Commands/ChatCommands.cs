@@ -22,7 +22,12 @@ public class ChatCommands(
     [SlashCommand("chat", "與 LLM 聊天")]
     public async Task ChatAsync(
         [Summary("message", "您想說的話")]
-        string message)
+        string message,
+        [Summary("reasoning-effort", "推理深度（預設：medium）")]
+        [Choice("low", "low")]
+        [Choice("medium", "medium")]
+        [Choice("high", "high")]
+        string reasoningEffort = "medium")
     {
         // Defer response as LLM might take time
         await DeferAsync();
@@ -63,13 +68,65 @@ public class ChatCommands(
 
             // Stream LLM response with real-time updates (with guild context for MaxTokens)
             var responseBuilder = new System.Text.StringBuilder();
+            var reasoningBuilder = new System.Text.StringBuilder();
             var lastUpdateTime = DateTime.UtcNow;
+            var lastReasoningUpdateTime = DateTime.UtcNow;
             int? promptTokens = null;
             int? completionTokens = null;
             var hasContent = false;
+            Discord.IUserMessage? reasoningMessage = null;
 
-            await foreach (var (content, pTokens, cTokens) in llmService.GetChatCompletionStreamingAsync(chatHistory, guildId))
+            await foreach (var (content, reasoning, pTokens, cTokens) in llmService.GetChatCompletionStreamingAsync(chatHistory, guildId, reasoningEffort))
             {
+                // Handle reasoning content
+                if (!string.IsNullOrEmpty(reasoning) && reasoning != reasoningBuilder.ToString())
+                {
+                    reasoningBuilder.Clear();
+                    reasoningBuilder.Append(reasoning);
+
+                    var now = DateTime.UtcNow;
+                    // Update reasoning message (rate limit: every 1 second)
+                    if ((now - lastReasoningUpdateTime).TotalSeconds >= 1.0 || reasoningMessage == null)
+                    {
+                        lastReasoningUpdateTime = now;
+                        
+                        // Truncate if too long (Discord embed limit is 4096)
+                        var displayReasoning = reasoning.Length > 4000 
+                            ? reasoning.Substring(0, 4000) + "..." 
+                            : reasoning;
+
+                        var reasoningEmbed = new EmbedBuilder()
+                            .WithColor(Color.Purple)
+                            .WithTitle("🧠 推理過程")
+                            .WithDescription(displayReasoning)
+                            .WithFooter("正在推理...")
+                            .Build();
+
+                        try
+                        {
+                            if (reasoningMessage == null)
+                            {
+                                // Send initial reasoning message
+                                reasoningMessage = await FollowupAsync(embed: reasoningEmbed);
+                            }
+                            else
+                            {
+                                // Update existing reasoning message
+                                await reasoningMessage.ModifyAsync(msg =>
+                                {
+                                    msg.Content = null;
+                                    msg.Embed = reasoningEmbed;
+                                });
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            // Log but don't stop streaming if update fails
+                            logger.Warning(ex, "Failed to update reasoning message");
+                        }
+                    }
+                }
+
                 if (!string.IsNullOrEmpty(content))
                 {
                     responseBuilder.Append(content);
@@ -144,6 +201,35 @@ public class ChatCommands(
             }
 
             var totalTokens = (promptTokens ?? 0) + (completionTokens ?? 0);
+
+            // Update final reasoning message if it exists
+            if (reasoningMessage != null && reasoningBuilder.Length > 0)
+            {
+                try
+                {
+                    var finalReasoning = reasoningBuilder.ToString();
+                    var displayReasoning = finalReasoning.Length > 4000 
+                        ? finalReasoning.Substring(0, 4000) + "..." 
+                        : finalReasoning;
+
+                    var finalReasoningEmbed = new EmbedBuilder()
+                        .WithColor(Color.Purple)
+                        .WithTitle("🧠 推理過程")
+                        .WithDescription(displayReasoning)
+                        .WithFooter($"推理完成 | 使用 reasoning_effort: {reasoningEffort}")
+                        .Build();
+
+                    await reasoningMessage.ModifyAsync(msg =>
+                    {
+                        msg.Content = null;
+                        msg.Embed = finalReasoningEmbed;
+                    });
+                }
+                catch (Exception ex)
+                {
+                    logger.Warning(ex, "Failed to update final reasoning message");
+                }
+            }
 
             // Record token usage
             await tokenControl.RecordTokenUsageAsync(userId, totalTokens, guildId);

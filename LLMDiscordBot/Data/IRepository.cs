@@ -14,6 +14,7 @@ public interface IRepository
 
     // Token usage operations
     Task<int> GetTodayTokenUsageAsync(ulong userId, DateTime today);
+    Task<int> GetUserTodayTokenUsageInGuildAsync(ulong userId, ulong guildId, DateTime today);
     Task AddTokenUsageAsync(ulong userId, int tokens, DateTime date, ulong? guildId = null);
 
     // Chat history operations
