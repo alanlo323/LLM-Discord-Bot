@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Http;
 using LLMDiscordBot.Configuration;
 using Serilog;
 using System.Net.Http.Json;
