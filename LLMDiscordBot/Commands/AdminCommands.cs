@@ -805,7 +805,7 @@ public class AdminCommands(
                 }
 
                 embed.AddField("\n📋 全域設定參考", 
-                    $"全域系統提示：`{(globalSettings.ContainsKey("GlobalSystemPrompt") ? globalSettings["GlobalSystemPrompt"].Substring(0, Math.Min(50, globalSettings["GlobalSystemPrompt"].Length)) + "..." : "無")}`\n" +
+                    $"全域系統提示：`{(globalSettings.ContainsKey("GlobalSystemPrompt") ? (globalSettings["GlobalSystemPrompt"].Length > 50 ? globalSettings["GlobalSystemPrompt"].Substring(0, 50) + "..." : globalSettings["GlobalSystemPrompt"]) : "無")}`\n" +
                     $"全域每日額度：`{(globalSettings.ContainsKey("GlobalDailyLimit") ? globalSettings["GlobalDailyLimit"] : "無")} tokens`\n" +
                     $"全域最大 Token：`{(globalSettings.ContainsKey("GlobalMaxTokens") ? globalSettings["GlobalMaxTokens"] : "無")} tokens`",
                     false);
