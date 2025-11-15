@@ -14,6 +14,8 @@ public class ChatHistory
     [ForeignKey(nameof(User))]
     public ulong UserId { get; set; }
 
+    public ulong? GuildId { get; set; }
+
     public ulong ChannelId { get; set; }
 
     [Required]

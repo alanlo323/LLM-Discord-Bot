@@ -84,11 +84,11 @@ public class TokenControlService(
     /// <summary>
     /// Record token usage for a user
     /// </summary>
-    public async Task RecordTokenUsageAsync(ulong userId, int tokens)
+    public async Task RecordTokenUsageAsync(ulong userId, int tokens, ulong? guildId = null)
     {
         var today = DateTime.UtcNow;
-        await repository.AddTokenUsageAsync(userId, tokens, today);
-        logger.Debug("Recorded {Tokens} tokens for user {UserId}", tokens, userId);
+        await repository.AddTokenUsageAsync(userId, tokens, today, guildId);
+        logger.Debug("Recorded {Tokens} tokens for user {UserId} in guild {GuildId}", tokens, userId, guildId);
     }
 
     /// <summary>

@@ -14,6 +14,8 @@ public class TokenUsage
     [ForeignKey(nameof(User))]
     public ulong UserId { get; set; }
 
+    public ulong? GuildId { get; set; }
+
     public DateTime Date { get; set; }
 
     public int TokensUsed { get; set; }

@@ -14,7 +14,7 @@ public interface IRepository
 
     // Token usage operations
     Task<int> GetTodayTokenUsageAsync(ulong userId, DateTime today);
-    Task AddTokenUsageAsync(ulong userId, int tokens, DateTime date);
+    Task AddTokenUsageAsync(ulong userId, int tokens, DateTime date, ulong? guildId = null);
 
     // Chat history operations
     Task AddChatHistoryAsync(ChatHistory history);
@@ -50,5 +50,14 @@ public interface IRepository
     Task<int> GetTodayMessageCountAsync(DateTime today);
     Task<List<TopUser>> GetTopUsersByTokenUsageAsync(DateTime date, int count);
     Task<List<DailyTrend>> GetDailyTokenUsageTrendAsync(DateTime startDate, DateTime endDate);
+
+    // Guild statistics operations
+    Task<int> GetGuildTodayTokenUsageAsync(ulong guildId, DateTime today);
+    Task<int> GetGuildTodayMessageCountAsync(ulong guildId, DateTime today);
+    Task<int> GetGuildActiveUsersTodayCountAsync(ulong guildId, DateTime today);
+    Task<List<TopUser>> GetGuildTopUsersByTokenUsageAsync(ulong guildId, DateTime date, int count);
+    Task<List<DailyTrend>> GetGuildDailyTokenUsageTrendAsync(ulong guildId, DateTime startDate, DateTime endDate);
+    Task<long> GetGuildTotalTokenUsageAsync(ulong guildId);
+    Task<long> GetGuildTotalMessageCountAsync(ulong guildId);
 }
 

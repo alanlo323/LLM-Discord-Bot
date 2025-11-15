@@ -58,7 +58,7 @@ public class Repository(BotDbContext context, ILogger logger) : IRepository
         return usage;
     }
 
-    public async Task AddTokenUsageAsync(ulong userId, int tokens, DateTime date)
+    public async Task AddTokenUsageAsync(ulong userId, int tokens, DateTime date, ulong? guildId = null)
     {
         var dateOnly = date.Date;
 
@@ -68,11 +68,24 @@ public class Repository(BotDbContext context, ILogger logger) : IRepository
         try
         {
             // Attempt atomic UPDATE first - this prevents read-modify-write race conditions
-            var rowsAffected = await context.Database.ExecuteSqlRawAsync(
-                @"UPDATE TokenUsages 
-                  SET TokensUsed = TokensUsed + {0}, MessageCount = MessageCount + 1 
-                  WHERE UserId = {1} AND Date = {2}",
-                tokens, userId, dateOnly);
+            // Handle both nullable and non-nullable GuildId comparison
+            int rowsAffected;
+            if (guildId.HasValue)
+            {
+                rowsAffected = await context.Database.ExecuteSqlRawAsync(
+                    @"UPDATE TokenUsages 
+                      SET TokensUsed = TokensUsed + {0}, MessageCount = MessageCount + 1 
+                      WHERE UserId = {1} AND Date = {2} AND GuildId = {3}",
+                    tokens, userId, dateOnly, guildId.Value);
+            }
+            else
+            {
+                rowsAffected = await context.Database.ExecuteSqlRawAsync(
+                    @"UPDATE TokenUsages 
+                      SET TokensUsed = TokensUsed + {0}, MessageCount = MessageCount + 1 
+                      WHERE UserId = {1} AND Date = {2} AND GuildId IS NULL",
+                    tokens, userId, dateOnly);
+            }
 
             // If no rows were affected, the record doesn't exist - INSERT it
             if (rowsAffected == 0)
@@ -80,6 +93,7 @@ public class Repository(BotDbContext context, ILogger logger) : IRepository
                 var usage = new TokenUsage
                 {
                     UserId = userId,
+                    GuildId = guildId,
                     Date = dateOnly,
                     TokensUsed = tokens,
                     MessageCount = 1,
@@ -90,7 +104,8 @@ public class Repository(BotDbContext context, ILogger logger) : IRepository
             }
 
             await transaction.CommitAsync();
-            logger.Debug("Added {Tokens} tokens for user {UserId} on {Date}", tokens, userId, dateOnly);
+            logger.Debug("Added {Tokens} tokens for user {UserId} on {Date} in guild {GuildId}", 
+                tokens, userId, dateOnly, guildId);
         }
         catch (Exception ex)
         {
@@ -459,6 +474,117 @@ public class Repository(BotDbContext context, ILogger logger) : IRepository
         }
 
         return allDates;
+    }
+
+    #endregion
+
+    #region Guild Statistics Operations
+
+    public async Task<int> GetGuildTodayTokenUsageAsync(ulong guildId, DateTime today)
+    {
+        var dateOnly = today.Date;
+        return await context.TokenUsages
+            .Where(t => t.GuildId == guildId && t.Date == dateOnly)
+            .SumAsync(t => (int?)t.TokensUsed) ?? 0;
+    }
+
+    public async Task<int> GetGuildTodayMessageCountAsync(ulong guildId, DateTime today)
+    {
+        var dateOnly = today.Date;
+        return await context.TokenUsages
+            .Where(t => t.GuildId == guildId && t.Date == dateOnly)
+            .SumAsync(t => (int?)t.MessageCount) ?? 0;
+    }
+
+    public async Task<int> GetGuildActiveUsersTodayCountAsync(ulong guildId, DateTime today)
+    {
+        var dateOnly = today.Date;
+        return await context.TokenUsages
+            .Where(t => t.GuildId == guildId && t.Date == dateOnly)
+            .Select(t => t.UserId)
+            .Distinct()
+            .CountAsync();
+    }
+
+    public async Task<List<TopUser>> GetGuildTopUsersByTokenUsageAsync(ulong guildId, DateTime date, int count)
+    {
+        var dateOnly = date.Date;
+        var topUsers = await context.TokenUsages
+            .Where(t => t.GuildId == guildId && t.Date == dateOnly)
+            .GroupBy(t => t.UserId)
+            .Select(g => new TopUser
+            {
+                UserId = g.Key,
+                TokensUsed = g.Sum(t => t.TokensUsed),
+                MessageCount = g.Sum(t => t.MessageCount)
+            })
+            .OrderByDescending(u => u.TokensUsed)
+            .Take(count)
+            .ToListAsync();
+
+        // Assign ranks
+        for (int i = 0; i < topUsers.Count; i++)
+        {
+            topUsers[i].Rank = i + 1;
+        }
+
+        return topUsers;
+    }
+
+    public async Task<List<DailyTrend>> GetGuildDailyTokenUsageTrendAsync(ulong guildId, DateTime startDate, DateTime endDate)
+    {
+        var startDateOnly = startDate.Date;
+        var endDateOnly = endDate.Date;
+
+        var trendsFromDb = await context.TokenUsages
+            .Where(t => t.GuildId == guildId && t.Date >= startDateOnly && t.Date <= endDateOnly)
+            .GroupBy(t => t.Date)
+            .Select(g => new DailyTrend
+            {
+                Date = g.Key,
+                TokensUsed = g.Sum(t => t.TokensUsed),
+                MessageCount = g.Sum(t => t.MessageCount),
+                ActiveUsers = g.Select(t => t.UserId).Distinct().Count()
+            })
+            .OrderBy(t => t.Date)
+            .ToListAsync();
+
+        // Fill in missing dates with zero values
+        var allDates = new List<DailyTrend>();
+        for (var date = startDateOnly; date <= endDateOnly; date = date.AddDays(1))
+        {
+            var existingTrend = trendsFromDb.FirstOrDefault(t => t.Date == date);
+            if (existingTrend != null)
+            {
+                allDates.Add(existingTrend);
+            }
+            else
+            {
+                allDates.Add(new DailyTrend
+                {
+                    Date = date,
+                    TokensUsed = 0,
+                    MessageCount = 0,
+                    ActiveUsers = 0
+                });
+            }
+        }
+
+        return allDates;
+    }
+
+    public async Task<long> GetGuildTotalTokenUsageAsync(ulong guildId)
+    {
+        return await context.TokenUsages
+            .Where(t => t.GuildId == guildId)
+            .SumAsync(t => (long)t.TokensUsed);
+    }
+
+    public async Task<long> GetGuildTotalMessageCountAsync(ulong guildId)
+    {
+        return await context.TokenUsages
+            .Where(t => t.GuildId == guildId)
+            .SumAsync(t => (long)t.MessageCount);
     }
 
     #endregion

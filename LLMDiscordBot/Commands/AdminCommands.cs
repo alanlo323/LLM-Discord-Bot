@@ -916,6 +916,131 @@ public class AdminCommands(
                 await RespondAsync("發生錯誤，請稍後再試。", ephemeral: true);
             }
         }
+
+        [SlashCommand("status", "查看伺服器狀態和統計")]
+        public async Task GuildStatusAsync()
+        {
+            if (!await RequireGuildAdminAsync()) return;
+
+            try
+            {
+                await DeferAsync();
+
+                var guildId = Context.Guild!.Id;
+                var today = DateTime.UtcNow;
+
+                // Get guild settings
+                var guildSettings = await repository.GetGuildSettingsAsync(guildId);
+                var globalSettings = await repository.GetAllSettingsAsync();
+
+                // Get guild statistics
+                var todayTokenUsage = await repository.GetGuildTodayTokenUsageAsync(guildId, today);
+                var todayMessageCount = await repository.GetGuildTodayMessageCountAsync(guildId, today);
+                var activeUsersToday = await repository.GetGuildActiveUsersTodayCountAsync(guildId, today);
+
+                var totalTokenUsage = await repository.GetGuildTotalTokenUsageAsync(guildId);
+                var totalMessageCount = await repository.GetGuildTotalMessageCountAsync(guildId);
+
+                // Get top users
+                var topUsers = await repository.GetGuildTopUsersByTokenUsageAsync(guildId, today, 5);
+
+                // Get 7-day trend
+                var last7DaysStart = today.AddDays(-6).Date;
+                var last7DaysTrend = await repository.GetGuildDailyTokenUsageTrendAsync(guildId, last7DaysStart, today);
+
+                // Get admin count
+                var admins = await repository.GetGuildAdminsAsync(guildId);
+
+                var embed = new EmbedBuilder()
+                    .WithColor(Color.Blue)
+                    .WithTitle($"📊 {Context.Guild.Name} 伺服器狀態")
+                    .WithDescription($"伺服器 ID: `{guildId}`\n成員數: **{Context.Guild.MemberCount}**")
+                    .WithThumbnailUrl(Context.Guild.IconUrl)
+                    .WithCurrentTimestamp();
+
+                // Settings section
+                var settingsText = "";
+                if (guildSettings != null)
+                {
+                    settingsText += $"系統提示: {(guildSettings.SystemPrompt != null && guildSettings.SystemPrompt.Length > 0 ? "✅ 已設定" : "❌ 使用全域")}\n";
+                    settingsText += $"每日額度: {(guildSettings.DailyLimit.HasValue ? $"**{guildSettings.DailyLimit.Value:N0}** tokens" : "使用用戶設定")}\n";
+                    settingsText += $"最大 Token: {(guildSettings.MaxTokens.HasValue ? $"**{guildSettings.MaxTokens.Value:N0}**" : "使用全域設定")}\n";
+                    settingsText += $"啟用限制: {(guildSettings.EnableLimits ? "✅ 是" : "❌ 否")}";
+                }
+                else
+                {
+                    settingsText = "使用全域預設設定";
+                }
+                embed.AddField("⚙️ 伺服器設定", settingsText, false);
+
+                // Admin section
+                embed.AddField("👥 管理員", $"**{admins.Count}** 位管理員", true);
+
+                // Today's statistics
+                embed.AddField("📅 今日統計",
+                    $"Token 使用: **{todayTokenUsage:N0}**\n" +
+                    $"訊息數量: **{todayMessageCount:N0}**\n" +
+                    $"活躍用戶: **{activeUsersToday:N0}**",
+                    true);
+
+                // Historical statistics
+                embed.AddField("📈 歷史統計",
+                    $"總 Token: **{totalTokenUsage:N0}**\n" +
+                    $"總訊息: **{totalMessageCount:N0}**\n" +
+                    $"平均每訊息: **{(totalMessageCount > 0 ? (double)totalTokenUsage / totalMessageCount : 0):N0}** tokens",
+                    true);
+
+                // Top users today
+                if (topUsers.Any())
+                {
+                    var topUsersText = string.Join("\n", topUsers.Select(u =>
+                        $"{u.Rank}. <@{u.UserId}>: **{u.TokensUsed:N0}** tokens ({u.MessageCount} 則)"));
+                    embed.AddField("🏆 今日使用排行 (Top 5)", topUsersText, false);
+                }
+                else
+                {
+                    embed.AddField("🏆 今日使用排行 (Top 5)", "今日尚無使用記錄", false);
+                }
+
+                // 7-day trend chart
+                var trendChart = CreateSimpleTrendChart(last7DaysTrend.TakeLast(7).ToList());
+                embed.AddField("📉 近 7 天使用趨勢", trendChart, false);
+
+                // Global settings reference
+                embed.AddField("🌐 全域設定參考",
+                    $"全域每日額度: `{(globalSettings.ContainsKey("GlobalDailyLimit") ? globalSettings["GlobalDailyLimit"] : "未設定")} tokens`\n" +
+                    $"全域最大 Token: `{(globalSettings.ContainsKey("GlobalMaxTokens") ? globalSettings["GlobalMaxTokens"] : "未設定")} tokens`",
+                    false);
+
+                await FollowupAsync(embed: embed.Build());
+                logger.Information("GuildAdmin {AdminId} viewed status for guild {GuildId}",
+                    Context.User.Id, guildId);
+            }
+            catch (Exception ex)
+            {
+                logger.Error(ex, "Error viewing guild status");
+                await FollowupAsync("發生錯誤，請稍後再試。", ephemeral: true);
+            }
+        }
+
+        private string CreateSimpleTrendChart(List<DailyTrend> trends)
+        {
+            if (!trends.Any())
+                return "無資料";
+
+            var maxTokens = trends.Max(t => t.TokensUsed);
+            var lines = new List<string>();
+
+            foreach (var trend in trends)
+            {
+                var barLength = maxTokens > 0 ? (int)((double)trend.TokensUsed / maxTokens * 20) : 0;
+                var bar = new string('█', Math.Max(1, barLength));
+                var dateStr = trend.Date.ToString("MM/dd");
+                lines.Add($"`{dateStr}` {bar} {trend.TokensUsed:N0} tokens");
+            }
+
+            return string.Join("\n", lines);
+        }
     }
 
     #endregion

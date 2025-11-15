@@ -146,12 +146,13 @@ public class ChatCommands(
             var totalTokens = (promptTokens ?? 0) + (completionTokens ?? 0);
 
             // Record token usage
-            await tokenControl.RecordTokenUsageAsync(userId, totalTokens);
+            await tokenControl.RecordTokenUsageAsync(userId, totalTokens, guildId);
 
             // Save chat history
             await repository.AddChatHistoryAsync(new Models.ChatHistory
             {
                 UserId = userId,
+                GuildId = guildId,
                 ChannelId = channelId,
                 Role = "user",
                 Content = message,
@@ -162,6 +163,7 @@ public class ChatCommands(
             await repository.AddChatHistoryAsync(new Models.ChatHistory
             {
                 UserId = userId,
+                GuildId = guildId,
                 ChannelId = channelId,
                 Role = "assistant",
                 Content = response,
