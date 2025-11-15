@@ -63,6 +63,7 @@ public class LLMService
     /// </summary>
     public async Task<(string response, int promptTokens, int completionTokens)> GetChatCompletionAsync(
         Microsoft.SemanticKernel.ChatCompletion.ChatHistory chatHistory,
+        ulong? guildId = null,
         CancellationToken cancellationToken = default)
     {
         try
@@ -70,10 +71,20 @@ public class LLMService
             // Get settings from database if available
             var modelSetting = await repository.GetSettingAsync("Model");
             var temperatureSetting = await repository.GetSettingAsync("Temperature");
-            var maxTokensSetting = await repository.GetSettingAsync("MaxTokens");
+            var globalMaxTokensSetting = await repository.GetSettingAsync("GlobalMaxTokens");
 
             var temperature = double.TryParse(temperatureSetting, out var temp) ? temp : config.Temperature;
-            var maxTokens = int.TryParse(maxTokensSetting, out var max) ? max : config.MaxTokens;
+            var maxTokens = int.TryParse(globalMaxTokensSetting, out var max) ? max : config.MaxTokens;
+
+            // Check for guild-specific MaxTokens override
+            if (guildId.HasValue)
+            {
+                var guildSettings = await repository.GetGuildSettingsAsync(guildId.Value);
+                if (guildSettings?.MaxTokens.HasValue == true)
+                {
+                    maxTokens = Math.Min(maxTokens, guildSettings.MaxTokens.Value);
+                }
+            }
 
             var executionSettings = new OpenAIPromptExecutionSettings
             {
@@ -177,6 +188,7 @@ public class LLMService
     /// </summary>
     public async IAsyncEnumerable<(string content, int? promptTokens, int? completionTokens)> GetChatCompletionStreamingAsync(
         Microsoft.SemanticKernel.ChatCompletion.ChatHistory chatHistory,
+        ulong? guildId = null,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         int? promptTokens = null;
@@ -187,10 +199,20 @@ public class LLMService
             // Get settings from database if available
             var modelSetting = await repository.GetSettingAsync("Model");
             var temperatureSetting = await repository.GetSettingAsync("Temperature");
-            var maxTokensSetting = await repository.GetSettingAsync("MaxTokens");
+            var globalMaxTokensSetting = await repository.GetSettingAsync("GlobalMaxTokens");
 
             var temperature = double.TryParse(temperatureSetting, out var temp) ? temp : config.Temperature;
-            var maxTokens = int.TryParse(maxTokensSetting, out var max) ? max : config.MaxTokens;
+            var maxTokens = int.TryParse(globalMaxTokensSetting, out var max) ? max : config.MaxTokens;
+
+            // Check for guild-specific MaxTokens override
+            if (guildId.HasValue)
+            {
+                var guildSettings = await repository.GetGuildSettingsAsync(guildId.Value);
+                if (guildSettings?.MaxTokens.HasValue == true)
+                {
+                    maxTokens = Math.Min(maxTokens, guildSettings.MaxTokens.Value);
+                }
+            }
 
             var executionSettings = new OpenAIPromptExecutionSettings
             {
@@ -312,12 +334,25 @@ public class LLMService
         ulong userId,
         ulong channelId,
         string userMessage,
+        ulong? guildId = null,
         int historyCount = 10)
     {
         var chatHistory = new Microsoft.SemanticKernel.ChatCompletion.ChatHistory();
 
-        // Add system message
-        var systemPrompt = await repository.GetSettingAsync("SystemPrompt") ?? config.SystemPrompt;
+        // Add system message: GlobalSystemPrompt first, then Guild SystemPrompt
+        var globalSystemPrompt = await repository.GetSettingAsync("GlobalSystemPrompt") ?? config.SystemPrompt;
+        var systemPrompt = globalSystemPrompt;
+
+        // Append guild-specific system prompt if available
+        if (guildId.HasValue)
+        {
+            var guildSettings = await repository.GetGuildSettingsAsync(guildId.Value);
+            if (guildSettings?.SystemPrompt != null && !string.IsNullOrWhiteSpace(guildSettings.SystemPrompt))
+            {
+                systemPrompt = $"{globalSystemPrompt}\n\n{guildSettings.SystemPrompt}";
+            }
+        }
+
         chatHistory.AddSystemMessage(systemPrompt);
 
         // Add recent conversation history

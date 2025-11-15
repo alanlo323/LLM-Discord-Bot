@@ -16,6 +16,8 @@ public class BotDbContext : DbContext
     public DbSet<TokenUsage> TokenUsages { get; set; } = null!;
     public DbSet<ChatHistory> ChatHistories { get; set; } = null!;
     public DbSet<BotSettings> BotSettings { get; set; } = null!;
+    public DbSet<GuildSettings> GuildSettings { get; set; } = null!;
+    public DbSet<GuildAdmin> GuildAdmins { get; set; } = null!;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -58,12 +60,29 @@ public class BotDbContext : DbContext
             entity.HasIndex(e => e.UpdatedAt);
         });
 
+        // GuildSettings entity configuration
+        modelBuilder.Entity<GuildSettings>(entity =>
+        {
+            entity.HasKey(e => e.GuildId);
+            entity.Property(e => e.GuildId).ValueGeneratedNever(); // Discord Guild ID, not auto-generated
+            entity.HasIndex(e => e.UpdatedAt);
+        });
+
+        // GuildAdmin entity configuration
+        modelBuilder.Entity<GuildAdmin>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.HasIndex(e => new { e.GuildId, e.UserId }).IsUnique();
+            entity.HasIndex(e => e.GuildId);
+            entity.HasIndex(e => e.UserId);
+        });
+
         // Seed default settings
         modelBuilder.Entity<BotSettings>().HasData(
             new BotSettings { Key = "Model", Value = "default", UpdatedAt = DateTime.UtcNow },
             new BotSettings { Key = "Temperature", Value = "0.7", UpdatedAt = DateTime.UtcNow },
-            new BotSettings { Key = "MaxTokens", Value = "2000", UpdatedAt = DateTime.UtcNow },
-            new BotSettings { Key = "SystemPrompt", Value = "You are a helpful AI assistant.", UpdatedAt = DateTime.UtcNow },
+            new BotSettings { Key = "GlobalMaxTokens", Value = "2000", UpdatedAt = DateTime.UtcNow },
+            new BotSettings { Key = "GlobalSystemPrompt", Value = "You are a helpful AI assistant.", UpdatedAt = DateTime.UtcNow },
             new BotSettings { Key = "GlobalDailyLimit", Value = "100000", UpdatedAt = DateTime.UtcNow }
         );
     }

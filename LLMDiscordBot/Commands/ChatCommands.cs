@@ -29,20 +29,21 @@ public class ChatCommands(
 
         var userId = Context.User.Id;
         var channelId = Context.Channel.Id;
+        var guildId = Context.Guild?.Id;
 
         // Acquire user-specific lock to serialize requests and prevent race conditions
         using var userLock = await requestQueue.AcquireUserLockAsync(userId);
 
         try
         {
-            logger.Information("User {Username} ({UserId}) sent chat message in channel {ChannelId}",
-                Context.User.Username, userId, channelId);
+            logger.Information("User {Username} ({UserId}) sent chat message in channel {ChannelId}, guild {GuildId}",
+                Context.User.Username, userId, channelId, guildId);
 
             // Estimate tokens needed for the message
             var estimatedTokens = llmService.EstimateTokenCount(message) + 500; // Add buffer for response
 
-            // Check token limit
-            var (allowed, used, limit) = await tokenControl.CheckTokenLimitAsync(userId, estimatedTokens);
+            // Check token limit (with guild context)
+            var (allowed, used, limit) = await tokenControl.CheckTokenLimitAsync(userId, estimatedTokens, guildId);
             if (!allowed)
             {
                 await FollowupAsync(
@@ -57,17 +58,17 @@ public class ChatCommands(
                 return;
             }
 
-            // Build chat history
-            var chatHistory = await llmService.BuildChatHistoryAsync(userId, channelId, message);
+            // Build chat history (with guild context for SystemPrompt)
+            var chatHistory = await llmService.BuildChatHistoryAsync(userId, channelId, message, guildId);
 
-            // Stream LLM response with real-time updates
+            // Stream LLM response with real-time updates (with guild context for MaxTokens)
             var responseBuilder = new System.Text.StringBuilder();
             var lastUpdateTime = DateTime.UtcNow;
             int? promptTokens = null;
             int? completionTokens = null;
             var hasContent = false;
 
-            await foreach (var (content, pTokens, cTokens) in llmService.GetChatCompletionStreamingAsync(chatHistory))
+            await foreach (var (content, pTokens, cTokens) in llmService.GetChatCompletionStreamingAsync(chatHistory, guildId))
             {
                 if (!string.IsNullOrEmpty(content))
                 {

@@ -19,9 +19,27 @@ public class TokenControlService(
     /// <summary>
     /// Check if user has enough tokens remaining for today
     /// </summary>
-    public async Task<(bool allowed, int used, int limit)> CheckTokenLimitAsync(ulong userId, int tokensNeeded)
+    public async Task<(bool allowed, int used, int limit)> CheckTokenLimitAsync(ulong userId, int tokensNeeded, ulong? guildId = null)
     {
-        if (!config.EnableLimits)
+        // Determine if limits are enabled
+        bool limitsEnabled = config.EnableLimits;
+
+        // Check guild-specific limit settings if guild context is provided
+        if (guildId.HasValue)
+        {
+            var guildSettings = await repository.GetGuildSettingsAsync(guildId.Value);
+            if (guildSettings != null)
+            {
+                // If global limits are disabled, check guild-specific EnableLimits
+                if (!config.EnableLimits)
+                {
+                    limitsEnabled = guildSettings.EnableLimits;
+                }
+                // If global limits are enabled, they override guild settings (always enabled)
+            }
+        }
+
+        if (!limitsEnabled)
         {
             return (true, 0, int.MaxValue);
         }
@@ -35,19 +53,32 @@ public class TokenControlService(
             return (false, 0, 0);
         }
 
+        // Determine the effective daily limit
+        int effectiveLimit = user.DailyTokenLimit;
+
+        if (guildId.HasValue)
+        {
+            var guildSettings = await repository.GetGuildSettingsAsync(guildId.Value);
+            if (guildSettings?.DailyLimit.HasValue == true)
+            {
+                // Use guild limit if it's set and lower than user's personal limit
+                effectiveLimit = Math.Min(effectiveLimit, guildSettings.DailyLimit.Value);
+            }
+        }
+
         var today = DateTime.UtcNow;
         var usedToday = await repository.GetTodayTokenUsageAsync(userId, today);
-        var remaining = user.DailyTokenLimit - usedToday;
+        var remaining = effectiveLimit - usedToday;
 
         var allowed = remaining >= tokensNeeded;
 
         if (!allowed)
         {
-            logger.Information("User {UserId} exceeded daily limit. Used: {Used}, Limit: {Limit}", 
-                userId, usedToday, user.DailyTokenLimit);
+            logger.Information("User {UserId} exceeded daily limit. Used: {Used}, Limit: {Limit}, Guild: {GuildId}", 
+                userId, usedToday, effectiveLimit, guildId);
         }
 
-        return (allowed, usedToday, user.DailyTokenLimit);
+        return (allowed, usedToday, effectiveLimit);
     }
 
     /// <summary>
@@ -63,18 +94,30 @@ public class TokenControlService(
     /// <summary>
     /// Get user statistics
     /// </summary>
-    public async Task<UserStats> GetUserStatsAsync(ulong userId)
+    public async Task<UserStats> GetUserStatsAsync(ulong userId, ulong? guildId = null)
     {
         var user = await repository.GetOrCreateUserAsync(userId, config.DefaultDailyLimit);
         var today = DateTime.UtcNow;
         var usedToday = await repository.GetTodayTokenUsageAsync(userId, today);
 
+        // Determine the effective daily limit
+        int effectiveLimit = user.DailyTokenLimit;
+
+        if (guildId.HasValue)
+        {
+            var guildSettings = await repository.GetGuildSettingsAsync(guildId.Value);
+            if (guildSettings?.DailyLimit.HasValue == true)
+            {
+                effectiveLimit = Math.Min(effectiveLimit, guildSettings.DailyLimit.Value);
+            }
+        }
+
         return new UserStats
         {
             UserId = userId,
-            DailyLimit = user.DailyTokenLimit,
+            DailyLimit = effectiveLimit,
             UsedToday = usedToday,
-            Remaining = user.DailyTokenLimit - usedToday,
+            Remaining = effectiveLimit - usedToday,
             IsBlocked = user.IsBlocked,
             CreatedAt = user.CreatedAt
         };

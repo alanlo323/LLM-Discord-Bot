@@ -21,7 +21,8 @@ public class UserCommands(
         try
         {
             var userId = Context.User.Id;
-            var stats = await tokenControl.GetUserStatsAsync(userId);
+            var guildId = Context.Guild?.Id;
+            var stats = await tokenControl.GetUserStatsAsync(userId, guildId);
 
             var percentage = stats.DailyLimit > 0 
                 ? (stats.UsedToday * 100.0 / stats.DailyLimit) 

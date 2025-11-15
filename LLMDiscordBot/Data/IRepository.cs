@@ -27,6 +27,19 @@ public interface IRepository
     Task SetSettingAsync(string key, string value, string? updatedBy = null);
     Task<Dictionary<string, string>> GetAllSettingsAsync();
 
+    // Guild settings operations
+    Task<GuildSettings?> GetGuildSettingsAsync(ulong guildId);
+    Task<GuildSettings> GetOrCreateGuildSettingsAsync(ulong guildId);
+    Task UpdateGuildSettingsAsync(GuildSettings settings);
+    Task<bool> ValidateGuildLimitsAsync(ulong guildId, int? dailyLimit, int? maxTokens);
+    Task<List<(GuildSettings guild, List<string> adjustments)>> AdjustGuildSettingsToGlobalLimitsAsync(int globalDailyLimit, int globalMaxTokens);
+
+    // Guild admin operations
+    Task<bool> IsGuildAdminAsync(ulong guildId, ulong userId);
+    Task<List<GuildAdmin>> GetGuildAdminsAsync(ulong guildId);
+    Task AddGuildAdminAsync(ulong guildId, ulong userId, string? createdBy = null);
+    Task RemoveGuildAdminAsync(ulong guildId, ulong userId);
+
     // Global statistics operations
     Task<int> GetTotalUsersCountAsync();
     Task<int> GetBlockedUsersCountAsync();

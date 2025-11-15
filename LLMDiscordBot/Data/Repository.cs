@@ -187,6 +187,165 @@ public class Repository(BotDbContext context, ILogger logger) : IRepository
 
     #endregion
 
+    #region Guild Settings Operations
+
+    public async Task<GuildSettings?> GetGuildSettingsAsync(ulong guildId)
+    {
+        return await context.GuildSettings.FindAsync(guildId);
+    }
+
+    public async Task<GuildSettings> GetOrCreateGuildSettingsAsync(ulong guildId)
+    {
+        var settings = await GetGuildSettingsAsync(guildId);
+        if (settings == null)
+        {
+            settings = new GuildSettings
+            {
+                GuildId = guildId,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+                EnableLimits = true
+            };
+            context.GuildSettings.Add(settings);
+            await context.SaveChangesAsync();
+            logger.Information("Created default settings for guild {GuildId}", guildId);
+        }
+        return settings;
+    }
+
+    public async Task UpdateGuildSettingsAsync(GuildSettings settings)
+    {
+        settings.UpdatedAt = DateTime.UtcNow;
+        context.GuildSettings.Update(settings);
+        await context.SaveChangesAsync();
+        logger.Information("Updated settings for guild {GuildId}", settings.GuildId);
+    }
+
+    public async Task<bool> ValidateGuildLimitsAsync(ulong guildId, int? dailyLimit, int? maxTokens)
+    {
+        var globalDailyLimitStr = await GetSettingAsync("GlobalDailyLimit");
+        var globalMaxTokensStr = await GetSettingAsync("GlobalMaxTokens");
+
+        var globalDailyLimit = int.TryParse(globalDailyLimitStr, out var gDL) ? gDL : int.MaxValue;
+        var globalMaxTokens = int.TryParse(globalMaxTokensStr, out var gMT) ? gMT : int.MaxValue;
+
+        if (dailyLimit.HasValue && dailyLimit.Value > globalDailyLimit)
+        {
+            logger.Warning("Guild {GuildId} attempted to set DailyLimit {DailyLimit} above global limit {GlobalLimit}", 
+                guildId, dailyLimit.Value, globalDailyLimit);
+            return false;
+        }
+
+        if (maxTokens.HasValue && maxTokens.Value > globalMaxTokens)
+        {
+            logger.Warning("Guild {GuildId} attempted to set MaxTokens {MaxTokens} above global limit {GlobalLimit}", 
+                guildId, maxTokens.Value, globalMaxTokens);
+            return false;
+        }
+
+        return true;
+    }
+
+    public async Task<List<(GuildSettings guild, List<string> adjustments)>> AdjustGuildSettingsToGlobalLimitsAsync(int globalDailyLimit, int globalMaxTokens)
+    {
+        var adjustedGuilds = new List<(GuildSettings, List<string>)>();
+
+        var guildsToAdjust = await context.GuildSettings
+            .Where(g => (g.DailyLimit.HasValue && g.DailyLimit.Value > globalDailyLimit) ||
+                       (g.MaxTokens.HasValue && g.MaxTokens.Value > globalMaxTokens))
+            .ToListAsync();
+
+        foreach (var guild in guildsToAdjust)
+        {
+            var adjustments = new List<string>();
+
+            if (guild.DailyLimit.HasValue && guild.DailyLimit.Value > globalDailyLimit)
+            {
+                adjustments.Add($"DailyLimit: {guild.DailyLimit} -> {globalDailyLimit}");
+                guild.DailyLimit = globalDailyLimit;
+            }
+
+            if (guild.MaxTokens.HasValue && guild.MaxTokens.Value > globalMaxTokens)
+            {
+                adjustments.Add($"MaxTokens: {guild.MaxTokens} -> {globalMaxTokens}");
+                guild.MaxTokens = globalMaxTokens;
+            }
+
+            if (adjustments.Any())
+            {
+                guild.UpdatedAt = DateTime.UtcNow;
+                guild.UpdatedBy = "System (Global Limit Adjustment)";
+                adjustedGuilds.Add((guild, adjustments));
+                logger.Information("Adjusted guild {GuildId} settings: {Adjustments}", 
+                    guild.GuildId, string.Join(", ", adjustments));
+            }
+        }
+
+        if (guildsToAdjust.Any())
+        {
+            await context.SaveChangesAsync();
+        }
+
+        return adjustedGuilds;
+    }
+
+    #endregion
+
+    #region Guild Admin Operations
+
+    public async Task<bool> IsGuildAdminAsync(ulong guildId, ulong userId)
+    {
+        return await context.GuildAdmins
+            .AnyAsync(ga => ga.GuildId == guildId && ga.UserId == userId);
+    }
+
+    public async Task<List<GuildAdmin>> GetGuildAdminsAsync(ulong guildId)
+    {
+        return await context.GuildAdmins
+            .Where(ga => ga.GuildId == guildId)
+            .OrderBy(ga => ga.CreatedAt)
+            .ToListAsync();
+    }
+
+    public async Task AddGuildAdminAsync(ulong guildId, ulong userId, string? createdBy = null)
+    {
+        // Check if already exists
+        var exists = await IsGuildAdminAsync(guildId, userId);
+        if (exists)
+        {
+            logger.Warning("User {UserId} is already an admin of guild {GuildId}", userId, guildId);
+            return;
+        }
+
+        var guildAdmin = new GuildAdmin
+        {
+            GuildId = guildId,
+            UserId = userId,
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = createdBy
+        };
+
+        context.GuildAdmins.Add(guildAdmin);
+        await context.SaveChangesAsync();
+        logger.Information("Added user {UserId} as admin of guild {GuildId} by {CreatedBy}", 
+            userId, guildId, createdBy ?? "System");
+    }
+
+    public async Task RemoveGuildAdminAsync(ulong guildId, ulong userId)
+    {
+        var guildAdmin = await context.GuildAdmins
+            .FirstOrDefaultAsync(ga => ga.GuildId == guildId && ga.UserId == userId);
+
+        if (guildAdmin != null)
+        {
+            context.GuildAdmins.Remove(guildAdmin);
+            await context.SaveChangesAsync();
+            logger.Information("Removed user {UserId} as admin of guild {GuildId}", userId, guildId);
+        }
+    }
+
+    #endregion
+
     #region Global Statistics Operations
 
     public async Task<int> GetTotalUsersCountAsync()
