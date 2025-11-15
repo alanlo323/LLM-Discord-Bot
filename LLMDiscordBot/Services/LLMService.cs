@@ -66,6 +66,10 @@ public class LLMService
         ulong? guildId = null,
         CancellationToken cancellationToken = default)
     {
+        // Apply default timeout of 5 minutes if no cancellation token provided
+        using var timeoutCts = new CancellationTokenSource(TimeSpan.FromMinutes(5));
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token);
+        
         try
         {
             // Get settings from database if available
@@ -98,7 +102,7 @@ public class LLMService
                 chatHistory,
                 executionSettings,
                 kernel,
-                cancellationToken);
+                linkedCts.Token);
 
             // Extract token usage from metadata
             var promptTokens = 0;
@@ -176,6 +180,11 @@ public class LLMService
 
             return ("", 0, 0);
         }
+        catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested)
+        {
+            logger.Error("LLM request timed out after 5 minutes");
+            throw new TimeoutException("LLM request timed out after 5 minutes");
+        }
         catch (Exception ex)
         {
             logger.Error(ex, "Error getting chat completion from LLM");
@@ -192,6 +201,10 @@ public class LLMService
         string? reasoningEffort = null,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        // Apply default timeout of 10 minutes for streaming (longer than non-streaming)
+        using var timeoutCts = new CancellationTokenSource(TimeSpan.FromMinutes(10));
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token);
+        
         int? promptTokens = null;
         int? completionTokens = null;
         string? reasoning = null;
@@ -238,7 +251,7 @@ public class LLMService
                 chatHistory,
                 executionSettings,
                 kernel,
-                cancellationToken))
+                linkedCts.Token))
             {
                 // Try to extract metadata if available
                 if (message.Metadata != null)
@@ -309,6 +322,11 @@ public class LLMService
 
             logger.Information("LLM streaming response completed. Prompt tokens: {PromptTokens}, Completion tokens: {CompletionTokens}",
                 promptTokens ?? 0, completionTokens ?? 0);
+        }
+        catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested)
+        {
+            logger.Error("LLM streaming request timed out after 10 minutes");
+            throw new TimeoutException("LLM streaming request timed out after 10 minutes");
         }
         finally
         {

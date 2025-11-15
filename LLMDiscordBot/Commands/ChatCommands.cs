@@ -35,6 +35,10 @@ public class ChatCommands(
         var userId = Context.User.Id;
         var channelId = Context.Channel.Id;
         var guildId = Context.Guild?.Id;
+        
+        // Track start time for interaction timeout detection (15 min limit)
+        var startTime = DateTime.UtcNow;
+        const int interactionTimeoutMinutes = 14; // Use 14 min to be safe
 
         // Acquire user-specific lock to serialize requests and prevent race conditions
         using var userLock = await requestQueue.AcquireUserLockAsync(userId);
@@ -44,11 +48,34 @@ public class ChatCommands(
             logger.Information("User {Username} ({UserId}) sent chat message in channel {ChannelId}, guild {GuildId}",
                 Context.User.Username, userId, channelId, guildId);
 
-            // Estimate tokens needed for the message
-            var estimatedTokens = llmService.EstimateTokenCount(message) + 500; // Add buffer for response
+            // Build chat history first (with guild context for SystemPrompt)
+            var chatHistory = await llmService.BuildChatHistoryAsync(userId, channelId, message, guildId);
+
+            // Calculate accurate prompt tokens using SharpToken
+            int estimatedPromptTokens = 0;
+            foreach (var historyMessage in chatHistory)
+            {
+                estimatedPromptTokens += llmService.CalculateTokenCount(historyMessage.Content ?? "");
+            }
+
+            // Get MaxTokens setting to estimate response size
+            var maxTokensSetting = await repository.GetSettingAsync("GlobalMaxTokens");
+            var maxTokens = int.TryParse(maxTokensSetting, out var max) ? max : 2000;
+            
+            if (guildId.HasValue)
+            {
+                var guildSettings = await repository.GetGuildSettingsAsync(guildId.Value);
+                if (guildSettings?.MaxTokens.HasValue == true)
+                {
+                    maxTokens = Math.Min(maxTokens, guildSettings.MaxTokens.Value);
+                }
+            }
+
+            // Estimate total tokens (prompt + expected response)
+            var estimatedTotalTokens = estimatedPromptTokens + maxTokens;
 
             // Check token limit (with guild context)
-            var (allowed, used, limit) = await tokenControl.CheckTokenLimitAsync(userId, estimatedTokens, guildId);
+            var (allowed, used, limit) = await tokenControl.CheckTokenLimitAsync(userId, estimatedTotalTokens, guildId);
             if (!allowed)
             {
                 await FollowupAsync(
@@ -56,15 +83,13 @@ public class ChatCommands(
                         .WithColor(Color.Red)
                         .WithTitle("❌ Token 額度不足")
                         .WithDescription($"您今天的 Token 額度已用完。\n\n" +
-                                       $"已使用: {used:N0} / {limit:N0}")
+                                       $"已使用: {used:N0} / {limit:N0}\n" +
+                                       $"本次請求預估: {estimatedTotalTokens:N0} tokens")
                         .WithFooter("額度將在每日 00:00 UTC 重置")
                         .Build(),
                     ephemeral: true);
                 return;
             }
-
-            // Build chat history (with guild context for SystemPrompt)
-            var chatHistory = await llmService.BuildChatHistoryAsync(userId, channelId, message, guildId);
 
             // Stream LLM response with real-time updates (with guild context for MaxTokens)
             var responseBuilder = new System.Text.StringBuilder();
@@ -75,9 +100,18 @@ public class ChatCommands(
             int? completionTokens = null;
             var hasContent = false;
             Discord.IUserMessage? reasoningMessage = null;
+            var interactionTimedOut = false;
+            var hasNotifiedTimeout = false;
 
             await foreach (var (content, reasoning, pTokens, cTokens) in llmService.GetChatCompletionStreamingAsync(chatHistory, guildId, reasoningEffort))
             {
+                // Check if we're approaching interaction timeout
+                if ((DateTime.UtcNow - startTime).TotalMinutes >= interactionTimeoutMinutes)
+                {
+                    interactionTimedOut = true;
+                    logger.Warning("Interaction approaching timeout for user {UserId}, switching to followup", userId);
+                }
+
                 // Handle reasoning content
                 if (!string.IsNullOrEmpty(reasoning) && reasoning != reasoningBuilder.ToString())
                 {
@@ -90,10 +124,8 @@ public class ChatCommands(
                     {
                         lastReasoningUpdateTime = now;
                         
-                        // Truncate if too long (Discord embed limit is 4096)
-                        var displayReasoning = reasoning.Length > 4000 
-                            ? reasoning.Substring(0, 4000) + "..." 
-                            : reasoning;
+                        // Truncate if too long (Discord embed description limit is 4096)
+                        var displayReasoning = SafeTruncate(reasoning, 4090);
 
                         var reasoningEmbed = new EmbedBuilder()
                             .WithColor(Color.Purple)
@@ -109,14 +141,18 @@ public class ChatCommands(
                                 // Send initial reasoning message
                                 reasoningMessage = await FollowupAsync(embed: reasoningEmbed);
                             }
-                            else
+                            else if (!interactionTimedOut)
                             {
-                                // Update existing reasoning message
+                                // Update existing reasoning message only if not timed out
                                 await reasoningMessage.ModifyAsync(msg =>
                                 {
                                     msg.Content = null;
                                     msg.Embed = reasoningEmbed;
                                 });
+                            }
+                            else
+                            {
+                                logger.Debug("Skipping reasoning message update due to interaction timeout");
                             }
                         }
                         catch (Exception ex)
@@ -143,26 +179,32 @@ public class ChatCommands(
                         lastUpdateTime = now;
                         var currentContent = responseBuilder.ToString();
 
-                        // Truncate if too long for streaming display (Discord embed limit)
-                        var displayContent = currentContent.Length > 1900 
-                            ? currentContent.Substring(0, 1900) + "..." 
-                            : currentContent;
+                        // Truncate if too long for streaming display (Discord embed description limit 4096)
+                        var displayContent = SafeTruncate(currentContent, 1900);
 
                         var streamingEmbed = new EmbedBuilder()
                             .WithColor(Color.Blue)
                             .WithAuthor(Context.User.Username, Context.User.GetAvatarUrl())
-                            .WithTitle($"💬 {(message.Length > 100 ? message.Substring(0, 100) + "..." : message)}")
+                            .WithTitle($"💬 {SafeTruncate(message, 100)}")
                             .WithDescription(displayContent)
                             .WithFooter("正在生成回應...")
                             .Build();
 
                         try
                         {
-                            await ModifyOriginalResponseAsync(msg =>
+                            // Skip updating original response if we've timed out
+                            if (interactionTimedOut)
                             {
-                                msg.Content = null;
-                                msg.Embed = streamingEmbed;
-                            });
+                                logger.Debug("Skipping streaming update due to interaction timeout");
+                            }
+                            else
+                            {
+                                await ModifyOriginalResponseAsync(msg =>
+                                {
+                                    msg.Content = null;
+                                    msg.Embed = streamingEmbed;
+                                });
+                            }
                         }
                         catch (Exception ex)
                         {
@@ -203,14 +245,12 @@ public class ChatCommands(
             var totalTokens = (promptTokens ?? 0) + (completionTokens ?? 0);
 
             // Update final reasoning message if it exists
-            if (reasoningMessage != null && reasoningBuilder.Length > 0)
+            if (reasoningMessage != null && reasoningBuilder.Length > 0 && !interactionTimedOut)
             {
                 try
                 {
                     var finalReasoning = reasoningBuilder.ToString();
-                    var displayReasoning = finalReasoning.Length > 4000 
-                        ? finalReasoning.Substring(0, 4000) + "..." 
-                        : finalReasoning;
+                    var displayReasoning = SafeTruncate(finalReasoning, 4090);
 
                     var finalReasoningEmbed = new EmbedBuilder()
                         .WithColor(Color.Purple)
@@ -229,6 +269,10 @@ public class ChatCommands(
                 {
                     logger.Warning(ex, "Failed to update final reasoning message");
                 }
+            }
+            else if (interactionTimedOut && reasoningMessage != null && reasoningBuilder.Length > 0)
+            {
+                logger.Debug("Skipping final reasoning message update due to interaction timeout");
             }
 
             // Record token usage
@@ -261,19 +305,32 @@ public class ChatCommands(
             // Split response if too long (Discord limit is 2000 characters per message)
             if (response.Length <= 1900)
             {
+                var footerText = interactionTimedOut
+                    ? $"使用 {totalTokens:N0} tokens | 今日已使用 {used + totalTokens:N0} / {limit:N0} | 因處理時間較長，以新消息回覆"
+                    : $"使用 {totalTokens:N0} tokens | 今日已使用 {used + totalTokens:N0} / {limit:N0}";
+
                 var embed = new EmbedBuilder()
                     .WithColor(Color.Blue)
                     .WithAuthor(Context.User.Username, Context.User.GetAvatarUrl())
-                    .WithTitle($"💬 {(message.Length > 100 ? string.Concat(message.AsSpan(0, 100), "...") : message)}")
+                    .WithTitle($"💬 {SafeTruncate(message, 100)}")
                     .WithDescription(response)
-                    .WithFooter($"使用 {totalTokens:N0} tokens | 今日已使用 {used + totalTokens:N0} / {limit:N0}")
+                    .WithFooter(footerText)
                     .Build();
 
-                await ModifyOriginalResponseAsync(msg =>
+                if (interactionTimedOut)
                 {
-                    msg.Content = null; // Clear the "thinking" text
-                    msg.Embed = embed;
-                });
+                    // Use followup if timed out
+                    await FollowupAsync(embed: embed);
+                }
+                else
+                {
+                    // Use modify if not timed out
+                    await ModifyOriginalResponseAsync(msg =>
+                    {
+                        msg.Content = null; // Clear the "thinking" text
+                        msg.Embed = embed;
+                    });
+                }
             }
             else
             {
@@ -290,16 +347,19 @@ public class ChatCommands(
                     {
                         embedBuilder
                             .WithAuthor(Context.User.Username, Context.User.GetAvatarUrl())
-                            .WithTitle($"💬 {(message.Length > 100 ? message.Substring(0, 100) + "..." : message)}");
+                            .WithTitle($"💬 {SafeTruncate(message, 100)}");
                     }
 
                     if (i == chunks.Count - 1)
                     {
-                        embedBuilder.WithFooter($"使用 {totalTokens:N0} tokens | 今日已使用 {used + totalTokens:N0} / {limit:N0}");
+                        var footerText = interactionTimedOut
+                            ? $"使用 {totalTokens:N0} tokens | 今日已使用 {used + totalTokens:N0} / {limit:N0} | 因處理時間較長，以新消息回覆"
+                            : $"使用 {totalTokens:N0} tokens | 今日已使用 {used + totalTokens:N0} / {limit:N0}";
+                        embedBuilder.WithFooter(footerText);
                     }
 
-                    // First chunk updates the original deferred message, subsequent chunks use followup
-                    if (i == 0)
+                    // First chunk updates the original deferred message (unless timed out), subsequent chunks use followup
+                    if (i == 0 && !interactionTimedOut)
                     {
                         await ModifyOriginalResponseAsync(msg =>
                         {
@@ -372,12 +432,12 @@ public class ChatCommands(
                     currentChunk = "";
                 }
 
-                // If a single line is too long, split it
+                // If a single line is too long, split it safely
                 if (line.Length > maxLength)
                 {
                     for (int i = 0; i < line.Length; i += maxLength)
                     {
-                        chunks.Add(line.Substring(i, Math.Min(maxLength, line.Length - i)));
+                        chunks.Add(SafeSubstring(line, i, Math.Min(maxLength, line.Length - i)));
                     }
                 }
                 else
@@ -397,6 +457,53 @@ public class ChatCommands(
         }
 
         return chunks;
+    }
+
+    /// <summary>
+    /// Safely truncate string without breaking UTF-16 surrogate pairs
+    /// </summary>
+    private string SafeTruncate(string text, int maxLength, string ellipsis = "...")
+    {
+        if (text.Length <= maxLength)
+            return text;
+
+        // Account for ellipsis
+        var targetLength = maxLength - ellipsis.Length;
+        if (targetLength <= 0)
+            return ellipsis;
+
+        // Check if we're cutting in the middle of a surrogate pair
+        if (targetLength > 0 && char.IsHighSurrogate(text[targetLength - 1]))
+        {
+            targetLength--;
+        }
+
+        return text.Substring(0, targetLength) + ellipsis;
+    }
+
+    /// <summary>
+    /// Safely extract substring without breaking UTF-16 surrogate pairs
+    /// </summary>
+    private string SafeSubstring(string text, int startIndex, int length)
+    {
+        if (startIndex >= text.Length)
+            return string.Empty;
+
+        var endIndex = Math.Min(startIndex + length, text.Length);
+
+        // Adjust start if it's in the middle of a surrogate pair
+        if (startIndex > 0 && char.IsLowSurrogate(text[startIndex]))
+        {
+            startIndex--;
+        }
+
+        // Adjust end if it's in the middle of a surrogate pair
+        if (endIndex < text.Length && char.IsHighSurrogate(text[endIndex - 1]))
+        {
+            endIndex--;
+        }
+
+        return text.Substring(startIndex, endIndex - startIndex);
     }
 }
 

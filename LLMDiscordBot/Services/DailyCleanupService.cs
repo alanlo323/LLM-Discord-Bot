@@ -14,6 +14,8 @@ public class DailyCleanupService : BackgroundService
     private readonly IServiceProvider services;
     private readonly ILogger logger;
     private readonly TimeSpan checkInterval = TimeSpan.FromHours(1);
+    private int consecutiveFailures = 0;
+    private const int maxConsecutiveFailures = 5;
 
     public DailyCleanupService(IServiceProvider services, ILogger logger)
     {
@@ -30,14 +32,27 @@ public class DailyCleanupService : BackgroundService
             try
             {
                 await PerformCleanupAsync(stoppingToken);
+                consecutiveFailures = 0; // Reset on success
             }
             catch (Exception ex)
             {
-                logger.Error(ex, "Error during daily cleanup");
+                consecutiveFailures++;
+                logger.Error(ex, "Error during daily cleanup (failure #{FailureCount})", consecutiveFailures);
+
+                if (consecutiveFailures >= maxConsecutiveFailures)
+                {
+                    logger.Fatal("Daily cleanup has failed {FailureCount} times consecutively. Service will continue but manual intervention may be needed.", 
+                        consecutiveFailures);
+                }
             }
 
-            // Wait for next check
-            await Task.Delay(checkInterval, stoppingToken);
+            // Calculate delay with exponential backoff on failures
+            var delay = consecutiveFailures > 0
+                ? TimeSpan.FromMinutes(Math.Min(60, Math.Pow(2, consecutiveFailures - 1) * 5)) // Exponential backoff: 5, 10, 20, 40, 60 minutes
+                : checkInterval;
+
+            logger.Debug("Next cleanup in {Delay}", delay);
+            await Task.Delay(delay, stoppingToken);
         }
 
         logger.Information("Daily cleanup service stopped");

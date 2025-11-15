@@ -1045,13 +1045,14 @@ public class AdminCommands(
 
     #endregion
 
-    #region User Management Commands (Guild Admin)
+    #region User Management Commands (Requires appropriate permissions)
 
     [SlashCommand("user-stats", "查看指定用戶的使用統計")]
     public async Task UserStatsAsync(
         [Summary("user", "要查看的用戶")]
         IUser user)
     {
+        // Guild admins can view stats in their guild
         if (!await RequireGuildAdminAsync()) return;
 
         try
@@ -1120,12 +1121,13 @@ public class AdminCommands(
         }
     }
 
-    [SlashCommand("block", "封鎖用戶")]
+    [SlashCommand("block", "封鎖用戶（僅限全域管理員）")]
     public async Task BlockAsync(
         [Summary("user", "要封鎖的用戶")]
         IUser user)
     {
-        if (!await RequireGuildAdminAsync()) return;
+        // Block/Unblock affects global user status - requires global admin
+        if (!await RequireGlobalAdminAsync()) return;
 
         try
         {
@@ -1134,13 +1136,13 @@ public class AdminCommands(
             var embed = new EmbedBuilder()
                 .WithColor(Color.Red)
                 .WithTitle("🔒 用戶已封鎖")
-                .WithDescription($"已封鎖 {user.Mention}，該用戶將無法使用 Bot。")
+                .WithDescription($"已封鎖 {user.Mention}，該用戶將無法在任何伺服器使用 Bot。")
                 .WithCurrentTimestamp()
                 .Build();
 
             await RespondAsync(embed: embed);
-            logger.Warning("GuildAdmin {AdminId} blocked user {UserId} in guild {GuildId}", 
-                Context.User.Id, user.Id, Context.Guild?.Id);
+            logger.Warning("GlobalAdmin {AdminId} blocked user {UserId}", 
+                Context.User.Id, user.Id);
         }
         catch (Exception ex)
         {
@@ -1149,12 +1151,13 @@ public class AdminCommands(
         }
     }
 
-    [SlashCommand("unblock", "解封用戶")]
+    [SlashCommand("unblock", "解封用戶（僅限全域管理員）")]
     public async Task UnblockAsync(
         [Summary("user", "要解封的用戶")]
         IUser user)
     {
-        if (!await RequireGuildAdminAsync()) return;
+        // Block/Unblock affects global user status - requires global admin
+        if (!await RequireGlobalAdminAsync()) return;
 
         try
         {
@@ -1163,13 +1166,13 @@ public class AdminCommands(
             var embed = new EmbedBuilder()
                 .WithColor(Color.Green)
                 .WithTitle("✅ 用戶已解封")
-                .WithDescription($"已解封 {user.Mention}，該用戶現在可以使用 Bot。")
+                .WithDescription($"已解封 {user.Mention}，該用戶現在可以在所有伺服器使用 Bot。")
                 .WithCurrentTimestamp()
                 .Build();
 
             await RespondAsync(embed: embed);
-            logger.Information("GuildAdmin {AdminId} unblocked user {UserId} in guild {GuildId}", 
-                Context.User.Id, user.Id, Context.Guild?.Id);
+            logger.Information("GlobalAdmin {AdminId} unblocked user {UserId}", 
+                Context.User.Id, user.Id);
         }
         catch (Exception ex)
         {

@@ -60,7 +60,7 @@ public class DiscordBotService : IHostedService
         logger.Information("Stopping Discord Bot Service...");
         await client.StopAsync();
         await client.LogoutAsync();
-        client.Dispose();
+        // Note: Don't dispose client here - it's managed by DI container
         logger.Information("Discord Bot Service stopped");
     }
 

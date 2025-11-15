@@ -92,10 +92,10 @@ class Program
                 // Register repositories
                 services.AddScoped<IRepository, Repository>();
 
-                // Register services
+                // Register services (using Scoped to match Repository lifecycle)
                 services.AddSingleton<CommandHandlerService>();
-                services.AddSingleton<LLMService>();
-                services.AddSingleton<TokenControlService>();
+                services.AddScoped<LLMService>();  // Changed to Scoped - depends on IRepository
+                services.AddScoped<TokenControlService>();  // Changed to Scoped - depends on IRepository
                 services.AddSingleton<UserRequestQueueService>();
 
                 // Register hosted services

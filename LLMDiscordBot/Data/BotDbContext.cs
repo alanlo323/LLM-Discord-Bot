@@ -35,7 +35,11 @@ public class BotDbContext : DbContext
         modelBuilder.Entity<TokenUsage>(entity =>
         {
             entity.HasKey(e => e.Id);
-            entity.HasIndex(e => new { e.UserId, e.Date }).IsUnique();
+            // Fixed: Include GuildId in unique index to support per-guild tracking
+            entity.HasIndex(e => new { e.UserId, e.GuildId, e.Date }).IsUnique();
+            // Add separate index on GuildId for guild-specific queries
+            entity.HasIndex(e => e.GuildId);
+            entity.HasIndex(e => e.Date);
             entity.HasOne(e => e.User)
                 .WithMany(u => u.TokenUsages)
                 .HasForeignKey(e => e.UserId)
@@ -47,6 +51,8 @@ public class BotDbContext : DbContext
         {
             entity.HasKey(e => e.Id);
             entity.HasIndex(e => new { e.UserId, e.ChannelId, e.Timestamp });
+            // Add index on GuildId for guild-specific queries
+            entity.HasIndex(e => e.GuildId);
             entity.HasOne(e => e.User)
                 .WithMany(u => u.ChatHistories)
                 .HasForeignKey(e => e.UserId)

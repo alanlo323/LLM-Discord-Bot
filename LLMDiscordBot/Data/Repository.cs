@@ -76,40 +76,59 @@ public class Repository(BotDbContext context, ILogger logger) : IRepository
         
         try
         {
-            // Attempt atomic UPDATE first - this prevents read-modify-write race conditions
-            // Handle both nullable and non-nullable GuildId comparison
-            int rowsAffected;
-            if (guildId.HasValue)
+            // Use INSERT OR REPLACE (UPSERT) to handle concurrency better
+            // SQLite doesn't support the UPDATE ... RETURNING pattern well, so we use a different approach
+            
+            // First, try to find existing record with retry logic for concurrency
+            var maxRetries = 3;
+            for (int retry = 0; retry < maxRetries; retry++)
             {
-                rowsAffected = await context.Database.ExecuteSqlRawAsync(
-                    @"UPDATE TokenUsages 
-                      SET TokensUsed = TokensUsed + {0}, MessageCount = MessageCount + 1 
-                      WHERE UserId = {1} AND Date = {2} AND GuildId = {3}",
-                    tokens, userId, dateOnly, guildId.Value);
-            }
-            else
-            {
-                rowsAffected = await context.Database.ExecuteSqlRawAsync(
-                    @"UPDATE TokenUsages 
-                      SET TokensUsed = TokensUsed + {0}, MessageCount = MessageCount + 1 
-                      WHERE UserId = {1} AND Date = {2} AND GuildId IS NULL",
-                    tokens, userId, dateOnly);
-            }
-
-            // If no rows were affected, the record doesn't exist - INSERT it
-            if (rowsAffected == 0)
-            {
-                var usage = new TokenUsage
+                try
                 {
-                    UserId = userId,
-                    GuildId = guildId,
-                    Date = dateOnly,
-                    TokensUsed = tokens,
-                    MessageCount = 1,
-                    CreatedAt = DateTime.UtcNow
-                };
-                context.TokenUsages.Add(usage);
-                await context.SaveChangesAsync();
+                    // Attempt atomic UPDATE first
+                    int rowsAffected;
+                    if (guildId.HasValue)
+                    {
+                        rowsAffected = await context.Database.ExecuteSqlInterpolatedAsync(
+                            $@"UPDATE TokenUsages 
+                              SET TokensUsed = TokensUsed + {tokens}, MessageCount = MessageCount + 1 
+                              WHERE UserId = {userId} AND Date = {dateOnly} AND GuildId = {guildId.Value}");
+                    }
+                    else
+                    {
+                        rowsAffected = await context.Database.ExecuteSqlInterpolatedAsync(
+                            $@"UPDATE TokenUsages 
+                              SET TokensUsed = TokensUsed + {tokens}, MessageCount = MessageCount + 1 
+                              WHERE UserId = {userId} AND Date = {dateOnly} AND GuildId IS NULL");
+                    }
+
+                    // If no rows were affected, the record doesn't exist - INSERT it
+                    if (rowsAffected == 0)
+                    {
+                        var usage = new TokenUsage
+                        {
+                            UserId = userId,
+                            GuildId = guildId,
+                            Date = dateOnly,
+                            TokensUsed = tokens,
+                            MessageCount = 1,
+                            CreatedAt = DateTime.UtcNow
+                        };
+                        context.TokenUsages.Add(usage);
+                        await context.SaveChangesAsync();
+                    }
+
+                    // Success - break out of retry loop
+                    break;
+                }
+                catch (DbUpdateException) when (retry < maxRetries - 1)
+                {
+                    // Unique constraint violation - another thread inserted, retry UPDATE
+                    logger.Debug("Concurrency conflict detected, retrying... (attempt {Retry}/{MaxRetries})", 
+                        retry + 1, maxRetries);
+                    await Task.Delay(10 * (retry + 1)); // Exponential backoff
+                    continue;
+                }
             }
 
             await transaction.CommitAsync();
