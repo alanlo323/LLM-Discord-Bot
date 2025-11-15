@@ -11,8 +11,8 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace LLMDiscordBot.Migrations
 {
     [DbContext(typeof(BotDbContext))]
-    [Migration("20251114135457_AddUniqueConstraintToTokenUsage")]
-    partial class AddUniqueConstraintToTokenUsage
+    [Migration("20251115140005_InitialCreate")]
+    partial class InitialCreate
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -46,31 +46,31 @@ namespace LLMDiscordBot.Migrations
                         new
                         {
                             Key = "Model",
-                            UpdatedAt = new DateTime(2025, 11, 14, 13, 54, 56, 420, DateTimeKind.Utc).AddTicks(6437),
+                            UpdatedAt = new DateTime(2025, 11, 15, 14, 0, 4, 908, DateTimeKind.Utc).AddTicks(1141),
                             Value = "default"
                         },
                         new
                         {
                             Key = "Temperature",
-                            UpdatedAt = new DateTime(2025, 11, 14, 13, 54, 56, 420, DateTimeKind.Utc).AddTicks(6439),
+                            UpdatedAt = new DateTime(2025, 11, 15, 14, 0, 4, 908, DateTimeKind.Utc).AddTicks(1142),
                             Value = "0.7"
                         },
                         new
                         {
-                            Key = "MaxTokens",
-                            UpdatedAt = new DateTime(2025, 11, 14, 13, 54, 56, 420, DateTimeKind.Utc).AddTicks(6440),
+                            Key = "GlobalMaxTokens",
+                            UpdatedAt = new DateTime(2025, 11, 15, 14, 0, 4, 908, DateTimeKind.Utc).AddTicks(1143),
                             Value = "2000"
                         },
                         new
                         {
-                            Key = "SystemPrompt",
-                            UpdatedAt = new DateTime(2025, 11, 14, 13, 54, 56, 420, DateTimeKind.Utc).AddTicks(6441),
+                            Key = "GlobalSystemPrompt",
+                            UpdatedAt = new DateTime(2025, 11, 15, 14, 0, 4, 908, DateTimeKind.Utc).AddTicks(1144),
                             Value = "You are a helpful AI assistant."
                         },
                         new
                         {
                             Key = "GlobalDailyLimit",
-                            UpdatedAt = new DateTime(2025, 11, 14, 13, 54, 56, 420, DateTimeKind.Utc).AddTicks(6442),
+                            UpdatedAt = new DateTime(2025, 11, 15, 14, 0, 4, 908, DateTimeKind.Utc).AddTicks(1145),
                             Value = "100000"
                         });
                 });
@@ -107,6 +107,70 @@ namespace LLMDiscordBot.Migrations
                     b.HasIndex("UserId", "ChannelId", "Timestamp");
 
                     b.ToTable("ChatHistories");
+                });
+
+            modelBuilder.Entity("LLMDiscordBot.Models.GuildAdmin", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("TEXT");
+
+                    b.Property<ulong>("GuildId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<ulong>("UserId")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("GuildId");
+
+                    b.HasIndex("UserId");
+
+                    b.HasIndex("GuildId", "UserId")
+                        .IsUnique();
+
+                    b.ToTable("GuildAdmins");
+                });
+
+            modelBuilder.Entity("LLMDiscordBot.Models.GuildSettings", b =>
+                {
+                    b.Property<ulong>("GuildId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("DailyLimit")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("EnableLimits")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int?>("MaxTokens")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("SystemPrompt")
+                        .HasMaxLength(2000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("GuildId");
+
+                    b.HasIndex("UpdatedAt");
+
+                    b.ToTable("GuildSettings");
                 });
 
             modelBuilder.Entity("LLMDiscordBot.Models.TokenUsage", b =>

@@ -24,7 +24,41 @@ namespace LLMDiscordBot.Migrations
                 },
                 constraints: table =>
                 {
-                    table.PrimaryKey("PKBotSettings", x => x.Key);
+                    table.PrimaryKey("PK_BotSettings", x => x.Key);
+                });
+
+            migrationBuilder.CreateTable(
+                name: "GuildAdmins",
+                columns: table => new
+                {
+                    Id = table.Column<int>(type: "INTEGER", nullable: false)
+                        .Annotation("Sqlite:Autoincrement", true),
+                    GuildId = table.Column<ulong>(type: "INTEGER", nullable: false),
+                    UserId = table.Column<ulong>(type: "INTEGER", nullable: false),
+                    CreatedAt = table.Column<DateTime>(type: "TEXT", nullable: false),
+                    CreatedBy = table.Column<string>(type: "TEXT", nullable: true)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_GuildAdmins", x => x.Id);
+                });
+
+            migrationBuilder.CreateTable(
+                name: "GuildSettings",
+                columns: table => new
+                {
+                    GuildId = table.Column<ulong>(type: "INTEGER", nullable: false),
+                    SystemPrompt = table.Column<string>(type: "TEXT", maxLength: 2000, nullable: true),
+                    DailyLimit = table.Column<int>(type: "INTEGER", nullable: true),
+                    MaxTokens = table.Column<int>(type: "INTEGER", nullable: true),
+                    EnableLimits = table.Column<bool>(type: "INTEGER", nullable: false),
+                    CreatedAt = table.Column<DateTime>(type: "TEXT", nullable: false),
+                    UpdatedAt = table.Column<DateTime>(type: "TEXT", nullable: false),
+                    UpdatedBy = table.Column<string>(type: "TEXT", nullable: true)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_GuildSettings", x => x.GuildId);
                 });
 
             migrationBuilder.CreateTable(
@@ -40,7 +74,7 @@ namespace LLMDiscordBot.Migrations
                 },
                 constraints: table =>
                 {
-                    table.PrimaryKey("PKUsers", x => x.UserId);
+                    table.PrimaryKey("PK_Users", x => x.UserId);
                 });
 
             migrationBuilder.CreateTable(
@@ -58,9 +92,9 @@ namespace LLMDiscordBot.Migrations
                 },
                 constraints: table =>
                 {
-                    table.PrimaryKey("PKChatHistories", x => x.Id);
+                    table.PrimaryKey("PK_ChatHistories", x => x.Id);
                     table.ForeignKey(
-                        name: "FKChatHistoriesUsersUserId",
+                        name: "FK_ChatHistories_Users_UserId",
                         column: x => x.UserId,
                         principalTable: "Users",
                         principalColumn: "UserId",
@@ -81,9 +115,9 @@ namespace LLMDiscordBot.Migrations
                 },
                 constraints: table =>
                 {
-                    table.PrimaryKey("PKTokenUsages", x => x.Id);
+                    table.PrimaryKey("PK_TokenUsages", x => x.Id);
                     table.ForeignKey(
-                        name: "FKTokenUsagesUsersUserId",
+                        name: "FK_TokenUsages_Users_UserId",
                         column: x => x.UserId,
                         principalTable: "Users",
                         principalColumn: "UserId",
@@ -95,35 +129,57 @@ namespace LLMDiscordBot.Migrations
                 columns: new[] { "Key", "UpdatedAt", "UpdatedBy", "Value" },
                 values: new object[,]
                 {
-                    { "GlobalDailyLimit", new DateTime(2025, 11, 14, 12, 10, 14, 505, DateTimeKind.Utc).AddTicks(2826), null, "100000" },
-                    { "MaxTokens", new DateTime(2025, 11, 14, 12, 10, 14, 505, DateTimeKind.Utc).AddTicks(2824), null, "2000" },
-                    { "Model", new DateTime(2025, 11, 14, 12, 10, 14, 505, DateTimeKind.Utc).AddTicks(2822), null, "default" },
-                    { "SystemPrompt", new DateTime(2025, 11, 14, 12, 10, 14, 505, DateTimeKind.Utc).AddTicks(2825), null, "You are a helpful AI assistant." },
-                    { "Temperature", new DateTime(2025, 11, 14, 12, 10, 14, 505, DateTimeKind.Utc).AddTicks(2823), null, "0.7" }
+                    { "GlobalDailyLimit", new DateTime(2025, 11, 15, 14, 0, 4, 908, DateTimeKind.Utc).AddTicks(1145), null, "100000" },
+                    { "GlobalMaxTokens", new DateTime(2025, 11, 15, 14, 0, 4, 908, DateTimeKind.Utc).AddTicks(1143), null, "2000" },
+                    { "GlobalSystemPrompt", new DateTime(2025, 11, 15, 14, 0, 4, 908, DateTimeKind.Utc).AddTicks(1144), null, "You are a helpful AI assistant." },
+                    { "Model", new DateTime(2025, 11, 15, 14, 0, 4, 908, DateTimeKind.Utc).AddTicks(1141), null, "default" },
+                    { "Temperature", new DateTime(2025, 11, 15, 14, 0, 4, 908, DateTimeKind.Utc).AddTicks(1142), null, "0.7" }
                 });
 
             migrationBuilder.CreateIndex(
-                name: "IXBotSettingsUpdatedAt",
+                name: "IX_BotSettings_UpdatedAt",
                 table: "BotSettings",
                 column: "UpdatedAt");
 
             migrationBuilder.CreateIndex(
-                name: "IXChatHistoriesUserIdChannelIdTimestamp",
+                name: "IX_ChatHistories_UserId_ChannelId_Timestamp",
                 table: "ChatHistories",
                 columns: new[] { "UserId", "ChannelId", "Timestamp" });
 
             migrationBuilder.CreateIndex(
-                name: "IXTokenUsagesUserIdDate",
-                table: "TokenUsages",
-                columns: new[] { "UserId", "Date" });
+                name: "IX_GuildAdmins_GuildId",
+                table: "GuildAdmins",
+                column: "GuildId");
 
             migrationBuilder.CreateIndex(
-                name: "IXUsersCreatedAt",
+                name: "IX_GuildAdmins_GuildId_UserId",
+                table: "GuildAdmins",
+                columns: new[] { "GuildId", "UserId" },
+                unique: true);
+
+            migrationBuilder.CreateIndex(
+                name: "IX_GuildAdmins_UserId",
+                table: "GuildAdmins",
+                column: "UserId");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_GuildSettings_UpdatedAt",
+                table: "GuildSettings",
+                column: "UpdatedAt");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_TokenUsages_UserId_Date",
+                table: "TokenUsages",
+                columns: new[] { "UserId", "Date" },
+                unique: true);
+
+            migrationBuilder.CreateIndex(
+                name: "IX_Users_CreatedAt",
                 table: "Users",
                 column: "CreatedAt");
 
             migrationBuilder.CreateIndex(
-                name: "IXUsersIsBlocked",
+                name: "IX_Users_IsBlocked",
                 table: "Users",
                 column: "IsBlocked");
         }
@@ -136,6 +192,12 @@ namespace LLMDiscordBot.Migrations
 
             migrationBuilder.DropTable(
                 name: "ChatHistories");
+
+            migrationBuilder.DropTable(
+                name: "GuildAdmins");
+
+            migrationBuilder.DropTable(
+                name: "GuildSettings");
 
             migrationBuilder.DropTable(
                 name: "TokenUsages");

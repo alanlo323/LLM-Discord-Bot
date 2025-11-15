@@ -43,31 +43,31 @@ namespace LLMDiscordBot.Migrations
                         new
                         {
                             Key = "Model",
-                            UpdatedAt = new DateTime(2025, 11, 15, 12, 53, 32, 576, DateTimeKind.Utc).AddTicks(718),
+                            UpdatedAt = new DateTime(2025, 11, 15, 14, 0, 4, 908, DateTimeKind.Utc).AddTicks(1141),
                             Value = "default"
                         },
                         new
                         {
                             Key = "Temperature",
-                            UpdatedAt = new DateTime(2025, 11, 15, 12, 53, 32, 576, DateTimeKind.Utc).AddTicks(720),
+                            UpdatedAt = new DateTime(2025, 11, 15, 14, 0, 4, 908, DateTimeKind.Utc).AddTicks(1142),
                             Value = "0.7"
                         },
                         new
                         {
                             Key = "GlobalMaxTokens",
-                            UpdatedAt = new DateTime(2025, 11, 15, 12, 53, 32, 576, DateTimeKind.Utc).AddTicks(721),
+                            UpdatedAt = new DateTime(2025, 11, 15, 14, 0, 4, 908, DateTimeKind.Utc).AddTicks(1143),
                             Value = "2000"
                         },
                         new
                         {
                             Key = "GlobalSystemPrompt",
-                            UpdatedAt = new DateTime(2025, 11, 15, 12, 53, 32, 576, DateTimeKind.Utc).AddTicks(721),
+                            UpdatedAt = new DateTime(2025, 11, 15, 14, 0, 4, 908, DateTimeKind.Utc).AddTicks(1144),
                             Value = "You are a helpful AI assistant."
                         },
                         new
                         {
                             Key = "GlobalDailyLimit",
-                            UpdatedAt = new DateTime(2025, 11, 15, 12, 53, 32, 576, DateTimeKind.Utc).AddTicks(722),
+                            UpdatedAt = new DateTime(2025, 11, 15, 14, 0, 4, 908, DateTimeKind.Utc).AddTicks(1145),
                             Value = "100000"
                         });
                 });
