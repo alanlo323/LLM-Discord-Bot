@@ -308,6 +308,7 @@ public class AdminCommands(
         [SlashCommand("add-guild-admin", "新增伺服器管理員")]
         public async Task AddGuildAdminAsync(
             [Summary("guild-id", "伺服器 ID")]
+            [Autocomplete(typeof(GuildAutocompleteHandler))]
             string guildIdStr,
             [Summary("user", "要新增為管理員的用戶")]
             IUser user)
@@ -345,6 +346,7 @@ public class AdminCommands(
         [SlashCommand("remove-guild-admin", "移除伺服器管理員")]
         public async Task RemoveGuildAdminAsync(
             [Summary("guild-id", "伺服器 ID")]
+            [Autocomplete(typeof(GuildAutocompleteHandler))]
             string guildIdStr,
             [Summary("user", "要移除的管理員")]
             IUser user)
