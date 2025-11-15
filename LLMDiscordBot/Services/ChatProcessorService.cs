@@ -55,8 +55,11 @@ public class ChatProcessorService
             logger.Information("User {Username} ({UserId}) sent chat message in channel {ChannelId}, guild {GuildId}",
                 username, userId, channelId, guildId);
 
+            // Note: ChatProcessorService already receives username, guildName would need to be passed from caller
+            // For now, we pass null for guildName and channelName as they're not available in the current method signature
+            
             // Build chat history first (with guild context for SystemPrompt)
-            var chatHistory = await llmService.BuildChatHistoryAsync(userId, channelId, message, guildId);
+            var chatHistory = await llmService.BuildChatHistoryAsync(userId, channelId, message, guildId, 10, null, username, null, null);
 
             // Calculate accurate prompt tokens using SharpToken
             int estimatedPromptTokens = 0;

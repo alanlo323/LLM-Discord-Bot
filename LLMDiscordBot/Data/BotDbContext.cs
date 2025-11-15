@@ -18,6 +18,8 @@ public class BotDbContext : DbContext
     public DbSet<BotSettings> BotSettings { get; set; } = null!;
     public DbSet<GuildSettings> GuildSettings { get; set; } = null!;
     public DbSet<GuildAdmin> GuildAdmins { get; set; } = null!;
+    public DbSet<UserPreferences> UserPreferences { get; set; } = null!;
+    public DbSet<InteractionLog> InteractionLogs { get; set; } = null!;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -81,6 +83,29 @@ public class BotDbContext : DbContext
             entity.HasIndex(e => new { e.GuildId, e.UserId }).IsUnique();
             entity.HasIndex(e => e.GuildId);
             entity.HasIndex(e => e.UserId);
+        });
+
+        // UserPreferences entity configuration
+        modelBuilder.Entity<UserPreferences>(entity =>
+        {
+            entity.HasKey(e => e.UserId);
+            entity.Property(e => e.UserId).ValueGeneratedNever(); // Discord User ID, not auto-generated
+            entity.HasIndex(e => e.LastInteractionAt);
+            entity.HasIndex(e => e.UpdatedAt);
+            entity.HasOne(e => e.User)
+                .WithOne()
+                .HasForeignKey<UserPreferences>(e => e.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // InteractionLog entity configuration
+        modelBuilder.Entity<InteractionLog>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.HasIndex(e => new { e.UserId, e.Timestamp });
+            entity.HasIndex(e => e.GuildId);
+            entity.HasIndex(e => e.CommandType);
+            entity.HasIndex(e => e.Timestamp);
         });
 
         // Seed default settings

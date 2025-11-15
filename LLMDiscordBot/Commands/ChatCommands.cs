@@ -16,6 +16,7 @@ public class ChatCommands(
     TokenControlService tokenControl,
     IRepository repository,
     UserRequestQueueService requestQueue,
+    HabitLearningService habitLearning,
     ILogger logger) : InteractionModuleBase<SocketInteractionContext>
 {
 
@@ -48,8 +49,25 @@ public class ChatCommands(
             logger.Information("User {Username} ({UserId}) sent chat message in channel {ChannelId}, guild {GuildId}",
                 Context.User.Username, userId, channelId, guildId);
 
-            // Build chat history first (with guild context for SystemPrompt)
-            var chatHistory = await llmService.BuildChatHistoryAsync(userId, channelId, message, guildId);
+            // Detect topic category for habit learning
+            var topicCategory = habitLearning.DetectTopicCategory(message);
+
+            // Get personalized prompt addition based on user preferences
+            var globalSystemPrompt = await repository.GetSettingAsync("GlobalSystemPrompt") ?? "You are a helpful AI assistant.";
+            var personalizedPrompt = await habitLearning.BuildPersonalizedPromptAsync(userId, globalSystemPrompt);
+            var promptAddition = personalizedPrompt.StartsWith(globalSystemPrompt) 
+                ? personalizedPrompt.Substring(globalSystemPrompt.Length).TrimStart() 
+                : personalizedPrompt;
+
+            // Get context information for the LLM
+            var username = Context.User.Username;
+            var guildName = Context.Guild?.Name;
+            var channelName = Context.Channel.Name;
+
+            // Build chat history first (with guild context for SystemPrompt and user personalization)
+            var chatHistory = await llmService.BuildChatHistoryAsync(userId, channelId, message, guildId, 10, 
+                string.IsNullOrEmpty(promptAddition) ? null : promptAddition,
+                username, guildName, channelName);
 
             // Calculate accurate prompt tokens using SharpToken
             int estimatedPromptTokens = 0;
@@ -376,6 +394,38 @@ public class ChatCommands(
             }
 
             logger.Information("Chat response sent to user {UserId}. Tokens: {Tokens}", userId, totalTokens);
+
+            // Learn from this interaction and get suggestions
+            var interactionTime = DateTime.UtcNow - startTime;
+            try
+            {
+                await habitLearning.LearnFromInteractionAsync(
+                    userId,
+                    guildId,
+                    "chat",
+                    message,
+                    response,
+                    interactionTime,
+                    topicCategory);
+                    
+                // Get and display smart suggestions (if any) - based on updated habits
+                var suggestions = await habitLearning.GetSmartSuggestionsAsync(userId);
+                if (suggestions.Any())
+                {
+                    var suggestionText = string.Join("\n", suggestions);
+                    await FollowupAsync(
+                        embed: new EmbedBuilder()
+                            .WithColor(Color.Gold)
+                            .WithTitle("💡 智慧建議")
+                            .WithDescription(suggestionText)
+                            .Build(),
+                        ephemeral: true);
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.Warning(ex, "Failed to learn from interaction or get suggestions");
+            }
         }
         catch (Exception ex)
         {

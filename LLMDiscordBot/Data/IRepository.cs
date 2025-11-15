@@ -20,6 +20,7 @@ public interface IRepository
     // Chat history operations
     Task AddChatHistoryAsync(ChatHistory history);
     Task<List<ChatHistory>> GetRecentChatHistoryAsync(ulong userId, ulong channelId, int count);
+    Task<List<ChatHistory>> GetChannelRecentChatHistoryAsync(ulong channelId, int count);
     Task ClearChatHistoryAsync(ulong userId, ulong channelId);
     Task<List<ChatHistory>> GetUserChatHistoryAsync(ulong userId, int count);
 
@@ -60,5 +61,17 @@ public interface IRepository
     Task<List<DailyTrend>> GetGuildDailyTokenUsageTrendAsync(ulong guildId, DateTime startDate, DateTime endDate);
     Task<long> GetGuildTotalTokenUsageAsync(ulong guildId);
     Task<long> GetGuildTotalMessageCountAsync(ulong guildId);
+
+    // User preferences operations
+    Task<UserPreferences?> GetUserPreferencesAsync(ulong userId);
+    Task<UserPreferences> GetOrCreateUserPreferencesAsync(ulong userId);
+    Task UpdateUserPreferencesAsync(UserPreferences preferences);
+    Task UpdateUserHabitsAsync(ulong userId, string commandType, int messageLength, int responseLength, TimeSpan responseTime, string? topicCategory = null);
+
+    // Interaction log operations
+    Task AddInteractionLogAsync(InteractionLog log);
+    Task<List<InteractionLog>> GetUserInteractionHistoryAsync(ulong userId, int count);
+    Task<Dictionary<string, int>> GetUserCommandFrequencyAsync(ulong userId, DateTime since);
+    Task<List<string>> GetUserTopTopicsAsync(ulong userId, int count);
 }
 

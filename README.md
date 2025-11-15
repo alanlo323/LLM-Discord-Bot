@@ -117,6 +117,48 @@ dotnet run
 **參數：**
 - `count` (可選) - 要顯示的訊息數量（預設：10，最多：50）
 
+### 個性化設定命令
+
+Bot 會學習並適應您的使用習慣，提供個性化的回答體驗。
+
+#### `/preferences view`
+查看您的個人偏好設定和使用統計。
+
+#### `/preferences set-language <language>`
+設定您偏好的回答語言。
+
+#### `/preferences set-temperature <temperature>`
+設定生成溫度（0.0 = 更一致，2.0 = 更創意）。
+
+#### `/preferences set-max-tokens <max-tokens>`
+設定回答的最大長度。
+
+#### `/preferences set-style <style>`
+設定回答風格：簡潔、詳細、輕鬆、正式、技術性、創意性。
+
+#### `/preferences set-custom-prompt <prompt>`
+添加您自己的個性化指示。
+
+#### `/preferences toggle-code-examples`
+切換是否偏好在回答中包含程式碼範例。
+
+#### `/preferences toggle-step-by-step`
+切換是否偏好逐步教學式的回答。
+
+#### `/preferences reset`
+重置所有偏好設定為預設值。
+
+#### `/preferences stats`
+查看詳細的使用統計和習慣分析。
+
+**功能特點：**
+- 🎯 自動主題檢測（程式設計、數學、寫作等）
+- 📊 使用習慣追蹤（互動次數、連續天數、常用命令）
+- 💡 智慧建議（根據習慣提供個性化建議）
+- 🎨 完全自訂的回答體驗
+
+詳細說明請參考 [PERSONALIZATION_FEATURES.md](PERSONALIZATION_FEATURES.md)
+
 ### 管理員命令
 
 所有管理員命令都需要 Discord 伺服器的管理員權限。

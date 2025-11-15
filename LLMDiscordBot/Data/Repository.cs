@@ -165,6 +165,16 @@ public class Repository(BotDbContext context, ILogger logger) : IRepository
             .ToListAsync();
     }
 
+    public async Task<List<ChatHistory>> GetChannelRecentChatHistoryAsync(ulong channelId, int count)
+    {
+        return await context.ChatHistories
+            .Where(h => h.ChannelId == channelId)
+            .OrderByDescending(h => h.Timestamp)
+            .Take(count)
+            .OrderBy(h => h.Timestamp)
+            .ToListAsync();
+    }
+
     public async Task ClearChatHistoryAsync(ulong userId, ulong channelId)
     {
         var histories = await context.ChatHistories
@@ -613,6 +623,125 @@ public class Repository(BotDbContext context, ILogger logger) : IRepository
         return await context.TokenUsages
             .Where(t => t.GuildId == guildId)
             .SumAsync(t => (long)t.MessageCount);
+    }
+
+    #endregion
+
+    #region User Preferences Operations
+
+    public async Task<UserPreferences?> GetUserPreferencesAsync(ulong userId)
+    {
+        return await context.UserPreferences
+            .FirstOrDefaultAsync(p => p.UserId == userId);
+    }
+
+    public async Task<UserPreferences> GetOrCreateUserPreferencesAsync(ulong userId)
+    {
+        var preferences = await GetUserPreferencesAsync(userId);
+        if (preferences == null)
+        {
+            preferences = new UserPreferences
+            {
+                UserId = userId,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            };
+            context.UserPreferences.Add(preferences);
+            await context.SaveChangesAsync();
+        }
+        return preferences;
+    }
+
+    public async Task UpdateUserPreferencesAsync(UserPreferences preferences)
+    {
+        preferences.UpdatedAt = DateTime.UtcNow;
+        context.UserPreferences.Update(preferences);
+        await context.SaveChangesAsync();
+    }
+
+    public async Task UpdateUserHabitsAsync(ulong userId, string commandType, int messageLength, int responseLength, TimeSpan responseTime, string? topicCategory = null)
+    {
+        var preferences = await GetOrCreateUserPreferencesAsync(userId);
+
+        // Update interaction count
+        preferences.TotalInteractions++;
+
+        // Update average message length
+        preferences.AverageMessageLength = (preferences.AverageMessageLength * (preferences.TotalInteractions - 1) + messageLength) / preferences.TotalInteractions;
+
+        // Update last interaction
+        var now = DateTime.UtcNow;
+        if (preferences.LastInteractionAt.HasValue)
+        {
+            var daysSinceLastInteraction = (now.Date - preferences.LastInteractionAt.Value.Date).Days;
+            if (daysSinceLastInteraction == 1)
+            {
+                preferences.ConsecutiveDays++;
+            }
+            else if (daysSinceLastInteraction > 1)
+            {
+                preferences.ConsecutiveDays = 1;
+            }
+        }
+        else
+        {
+            preferences.ConsecutiveDays = 1;
+        }
+        preferences.LastInteractionAt = now;
+
+        // Update favorite commands (maintain top 10)
+        var commandFrequency = await GetUserCommandFrequencyAsync(userId, DateTime.UtcNow.AddDays(-30));
+        preferences.FavoriteCommands = System.Text.Json.JsonSerializer.Serialize(commandFrequency.Take(10).ToDictionary(x => x.Key, x => x.Value));
+
+        // Update top topics if provided
+        if (!string.IsNullOrEmpty(topicCategory))
+        {
+            var topTopics = await GetUserTopTopicsAsync(userId, 5);
+            preferences.MostUsedTopics = System.Text.Json.JsonSerializer.Serialize(topTopics);
+        }
+
+        await UpdateUserPreferencesAsync(preferences);
+    }
+
+    #endregion
+
+    #region Interaction Log Operations
+
+    public async Task AddInteractionLogAsync(InteractionLog log)
+    {
+        context.InteractionLogs.Add(log);
+        await context.SaveChangesAsync();
+    }
+
+    public async Task<List<InteractionLog>> GetUserInteractionHistoryAsync(ulong userId, int count)
+    {
+        return await context.InteractionLogs
+            .Where(l => l.UserId == userId)
+            .OrderByDescending(l => l.Timestamp)
+            .Take(count)
+            .ToListAsync();
+    }
+
+    public async Task<Dictionary<string, int>> GetUserCommandFrequencyAsync(ulong userId, DateTime since)
+    {
+        return await context.InteractionLogs
+            .Where(l => l.UserId == userId && l.Timestamp >= since)
+            .GroupBy(l => l.CommandType)
+            .Select(g => new { Command = g.Key, Count = g.Count() })
+            .OrderByDescending(x => x.Count)
+            .ToDictionaryAsync(x => x.Command, x => x.Count);
+    }
+
+    public async Task<List<string>> GetUserTopTopicsAsync(ulong userId, int count)
+    {
+        return await context.InteractionLogs
+            .Where(l => l.UserId == userId && l.TopicCategory != null)
+            .GroupBy(l => l.TopicCategory)
+            .Select(g => new { Topic = g.Key!, Count = g.Count() })
+            .OrderByDescending(x => x.Count)
+            .Take(count)
+            .Select(x => x.Topic)
+            .ToListAsync();
     }
 
     #endregion

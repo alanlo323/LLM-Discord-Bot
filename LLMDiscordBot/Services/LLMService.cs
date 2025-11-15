@@ -422,11 +422,15 @@ public class LLMService
         ulong channelId,
         string userMessage,
         ulong? guildId = null,
-        int historyCount = 10)
+        int historyCount = 10,
+        string? personalizedPromptAddition = null,
+        string? username = null,
+        string? guildName = null,
+        string? channelName = null)
     {
         var chatHistory = new Microsoft.SemanticKernel.ChatCompletion.ChatHistory();
 
-        // Add system message: GlobalSystemPrompt first, then Guild SystemPrompt
+        // Add system message: GlobalSystemPrompt first, then Guild SystemPrompt, then User personalization
         var globalSystemPrompt = await repository.GetSettingAsync("GlobalSystemPrompt") ?? config.SystemPrompt;
         var systemPrompt = globalSystemPrompt;
 
@@ -440,7 +444,20 @@ public class LLMService
             }
         }
 
+        // Append user-specific personalized prompt if available
+        if (!string.IsNullOrEmpty(personalizedPromptAddition))
+        {
+            systemPrompt = $"{systemPrompt}\n\n{personalizedPromptAddition}";
+        }
+
         chatHistory.AddSystemMessage(systemPrompt);
+
+        // Add context information as a separate system message
+        var contextInfo = await BuildContextInformationAsync(userId, channelId, guildId, username, guildName, channelName);
+        if (!string.IsNullOrEmpty(contextInfo))
+        {
+            chatHistory.AddSystemMessage(contextInfo);
+        }
 
         // Add recent conversation history
         var history = await repository.GetRecentChatHistoryAsync(userId, channelId, historyCount);
@@ -456,6 +473,125 @@ public class LLMService
         chatHistory.AddUserMessage(userMessage);
 
         return chatHistory;
+    }
+
+    /// <summary>
+    /// Build context information string for the LLM
+    /// </summary>
+    private async Task<string> BuildContextInformationAsync(
+        ulong userId,
+        ulong channelId,
+        ulong? guildId,
+        string? username,
+        string? guildName,
+        string? channelName)
+    {
+        var contextBuilder = new System.Text.StringBuilder();
+        contextBuilder.AppendLine("=== Context Information ===");
+        
+        // Current time
+        var currentTime = DateTime.UtcNow;
+        contextBuilder.AppendLine($"Current Time: {currentTime:yyyy-MM-dd HH:mm:ss} UTC");
+        
+        // User information
+        if (!string.IsNullOrEmpty(username))
+        {
+            contextBuilder.AppendLine($"Current User: {username} (ID: {userId})");
+        }
+        else
+        {
+            contextBuilder.AppendLine($"Current User ID: {userId}");
+        }
+        
+        // Server information
+        if (guildId.HasValue)
+        {
+            if (!string.IsNullOrEmpty(guildName))
+            {
+                contextBuilder.AppendLine($"Server: {guildName} (ID: {guildId.Value})");
+            }
+            else
+            {
+                contextBuilder.AppendLine($"Server ID: {guildId.Value}");
+            }
+        }
+        else
+        {
+            contextBuilder.AppendLine("Server: Direct Message");
+        }
+        
+        // Channel information
+        if (!string.IsNullOrEmpty(channelName))
+        {
+            contextBuilder.AppendLine($"Channel: {channelName} (ID: {channelId})");
+        }
+        else
+        {
+            contextBuilder.AppendLine($"Channel ID: {channelId}");
+        }
+        
+        // Get recent channel messages (all users)
+        var channelHistory = await repository.GetChannelRecentChatHistoryAsync(channelId, 10);
+        if (channelHistory.Any())
+        {
+            contextBuilder.AppendLine();
+            contextBuilder.AppendLine($"Recent Channel Messages (last {channelHistory.Count}):");
+            
+            foreach (var msg in channelHistory)
+            {
+                var timestamp = msg.Timestamp.ToString("yyyy-MM-dd HH:mm:ss");
+                var role = msg.Role.ToLower() == "user" ? "User" : "Bot";
+                var userIdStr = msg.UserId.ToString();
+                
+                // Truncate long messages for context
+                var content = msg.Content.Length > 100 
+                    ? msg.Content.Substring(0, 97) + "..." 
+                    : msg.Content;
+                
+                // Replace newlines in content to keep it compact
+                content = content.Replace("\n", " ").Replace("\r", "");
+                
+                contextBuilder.AppendLine($"[{timestamp}] {role} {userIdStr}: {content}");
+            }
+        }
+        
+        contextBuilder.AppendLine("=========================");
+        
+        return contextBuilder.ToString();
+    }
+
+    /// <summary>
+    /// Apply user preferences to execution settings
+    /// </summary>
+    public async Task<OpenAIPromptExecutionSettings> ApplyUserPreferencesToSettingsAsync(
+        OpenAIPromptExecutionSettings baseSettings,
+        ulong userId,
+        ulong? guildId = null)
+    {
+        var preferences = await repository.GetUserPreferencesAsync(userId);
+        if (preferences == null)
+            return baseSettings;
+
+        // Clone settings
+        var settings = new OpenAIPromptExecutionSettings
+        {
+            Temperature = preferences.PreferredTemperature ?? baseSettings.Temperature,
+            MaxTokens = preferences.PreferredMaxTokens ?? baseSettings.MaxTokens,
+            ToolCallBehavior = baseSettings.ToolCallBehavior,
+            ExtensionData = baseSettings.ExtensionData
+        };
+
+        // Guild settings take precedence over user preferences for MaxTokens
+        if (guildId.HasValue)
+        {
+            var guildSettings = await repository.GetGuildSettingsAsync(guildId.Value);
+            if (guildSettings?.MaxTokens.HasValue == true && settings.MaxTokens.HasValue)
+            {
+                settings.MaxTokens = Math.Min(settings.MaxTokens.Value, guildSettings.MaxTokens.Value);
+            }
+        }
+
+        return settings;
     }
 }
 

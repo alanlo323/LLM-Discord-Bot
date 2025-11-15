@@ -114,6 +114,7 @@ class Program
                 services.AddScoped<LLMService>();  // Changed to Scoped - depends on IRepository
                 services.AddScoped<TokenControlService>();  // Changed to Scoped - depends on IRepository
                 services.AddScoped<ChatProcessorService>();  // Chat processing service
+                services.AddScoped<HabitLearningService>();  // Habit learning service
                 services.AddSingleton<UserRequestQueueService>();
 
                 // Register hosted services
