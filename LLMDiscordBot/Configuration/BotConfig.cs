@@ -37,3 +37,20 @@ public class DatabaseConfig
     public string ConnectionString { get; set; } = string.Empty;
 }
 
+/// <summary>
+/// MCP (Model Context Protocol) configuration
+/// </summary>
+public class McpConfig
+{
+    public TavilyConfig Tavily { get; set; } = new();
+}
+
+/// <summary>
+/// Tavily MCP configuration
+/// </summary>
+public class TavilyConfig
+{
+    public string Endpoint { get; set; } = string.Empty;
+    public string ApiKey { get; set; } = string.Empty;
+}
+

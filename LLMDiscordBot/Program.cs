@@ -8,6 +8,7 @@ using Serilog;
 using LLMDiscordBot.Configuration;
 using LLMDiscordBot.Data;
 using LLMDiscordBot.Services;
+using LLMDiscordBot.Plugins;
 
 namespace LLMDiscordBot;
 
@@ -64,9 +65,16 @@ class Program
                 services.Configure<LLMConfig>(configuration.GetSection("LLM"));
                 services.Configure<TokenLimitsConfig>(configuration.GetSection("TokenLimits"));
                 services.Configure<DatabaseConfig>(configuration.GetSection("Database"));
+                services.Configure<McpConfig>(configuration.GetSection("MCP"));
 
                 // Register Serilog logger
                 services.AddSingleton(Log.Logger);
+
+                // Register HttpClient for MCP services
+                services.AddHttpClient("TavilyMcp", client =>
+                {
+                    client.Timeout = TimeSpan.FromSeconds(30);
+                });
 
                 // Register Discord client with configuration
                 services.AddSingleton<DiscordSocketClient>(provider =>
@@ -91,6 +99,10 @@ class Program
 
                 // Register repositories
                 services.AddScoped<IRepository, Repository>();
+
+                // Register MCP services
+                services.AddSingleton<McpService>();
+                services.AddSingleton<TavilySearchPlugin>();
 
                 // Register services (using Scoped to match Repository lifecycle)
                 services.AddSingleton<CommandHandlerService>();

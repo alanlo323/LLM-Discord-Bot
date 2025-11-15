@@ -4,6 +4,7 @@ using Microsoft.SemanticKernel.Connectors.OpenAI;
 using Microsoft.Extensions.Options;
 using LLMDiscordBot.Configuration;
 using LLMDiscordBot.Data;
+using LLMDiscordBot.Plugins;
 using Serilog;
 using SharpToken;
 
@@ -24,7 +25,8 @@ public class LLMService
     public LLMService(
         IOptions<LLMConfig> config,
         ILogger logger,
-        IRepository repository)
+        IRepository repository,
+        TavilySearchPlugin tavilySearchPlugin)
     {
         this.config = config.Value;
         this.logger = logger;
@@ -40,6 +42,11 @@ public class LLMService
         );
 
         this.kernel = builder.Build();
+        
+        // Register Tavily search plugin
+        this.kernel.Plugins.AddFromObject(tavilySearchPlugin, "TavilySearch");
+        this.logger.Information("Tavily search plugin registered to kernel");
+        
         this.chatService = this.kernel.GetRequiredService<IChatCompletionService>();
 
         // Initialize SharpToken encoding for accurate token counting
@@ -93,10 +100,11 @@ public class LLMService
             var executionSettings = new OpenAIPromptExecutionSettings
             {
                 Temperature = temperature,
-                MaxTokens = maxTokens
+                MaxTokens = maxTokens,
+                ToolCallBehavior = ToolCallBehavior.AutoInvokeKernelFunctions
             };
 
-            logger.Debug("Sending request to LLM with {MessageCount} messages", chatHistory.Count);
+            logger.Debug("Sending request to LLM with {MessageCount} messages (Auto function calling enabled)", chatHistory.Count);
 
             var result = await chatService.GetChatMessageContentsAsync(
                 chatHistory,
@@ -273,7 +281,8 @@ public class LLMService
         var executionSettings = new OpenAIPromptExecutionSettings
         {
             Temperature = temperature,
-            MaxTokens = maxTokens
+            MaxTokens = maxTokens,
+            ToolCallBehavior = ToolCallBehavior.AutoInvokeKernelFunctions
         };
 
         // Add reasoning_effort parameter if specified
@@ -286,7 +295,7 @@ public class LLMService
             logger.Debug("Added reasoning_effort parameter: {ReasoningEffort}", reasoningEffort);
         }
 
-        logger.Debug("Sending streaming request to LLM with {MessageCount} messages", chatHistory.Count);
+        logger.Debug("Sending streaming request to LLM with {MessageCount} messages (Auto function calling enabled)", chatHistory.Count);
 
         await foreach (var message in chatService.GetStreamingChatMessageContentsAsync(
             chatHistory,
