@@ -204,139 +204,165 @@ public class LLMService
         // Apply default timeout of 10 minutes for streaming (longer than non-streaming)
         using var timeoutCts = new CancellationTokenSource(TimeSpan.FromMinutes(10));
         using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token);
+
+        IAsyncEnumerator<(string content, string? reasoning, int? promptTokens, int? completionTokens)>? enumerator = null;
         
+        try
+        {
+            enumerator = GetChatCompletionStreamingInternalAsync(chatHistory, guildId, reasoningEffort, linkedCts.Token).GetAsyncEnumerator(linkedCts.Token);
+            
+            while (true)
+            {
+                bool hasNext;
+                try
+                {
+                    hasNext = await enumerator.MoveNextAsync();
+                }
+                catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested)
+                {
+                    logger.Error("LLM streaming request timed out after 10 minutes");
+                    throw new TimeoutException("LLM streaming request timed out after 10 minutes");
+                }
+                
+                if (!hasNext)
+                    break;
+                    
+                yield return enumerator.Current;
+            }
+        }
+        finally
+        {
+            if (enumerator != null)
+            {
+                await enumerator.DisposeAsync();
+            }
+        }
+    }
+
+    /// <summary>
+    /// Internal method for streaming chat completion
+    /// </summary>
+    private async IAsyncEnumerable<(string content, string? reasoning, int? promptTokens, int? completionTokens)> GetChatCompletionStreamingInternalAsync(
+        Microsoft.SemanticKernel.ChatCompletion.ChatHistory chatHistory,
+        ulong? guildId,
+        string? reasoningEffort,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
+    {
         int? promptTokens = null;
         int? completionTokens = null;
         string? reasoning = null;
 
-        try
+        // Get settings from database if available
+        var modelSetting = await repository.GetSettingAsync("Model");
+        var temperatureSetting = await repository.GetSettingAsync("Temperature");
+        var globalMaxTokensSetting = await repository.GetSettingAsync("GlobalMaxTokens");
+
+        var temperature = double.TryParse(temperatureSetting, out var temp) ? temp : config.Temperature;
+        var maxTokens = int.TryParse(globalMaxTokensSetting, out var max) ? max : config.MaxTokens;
+
+        // Check for guild-specific MaxTokens override
+        if (guildId.HasValue)
         {
-            // Get settings from database if available
-            var modelSetting = await repository.GetSettingAsync("Model");
-            var temperatureSetting = await repository.GetSettingAsync("Temperature");
-            var globalMaxTokensSetting = await repository.GetSettingAsync("GlobalMaxTokens");
-
-            var temperature = double.TryParse(temperatureSetting, out var temp) ? temp : config.Temperature;
-            var maxTokens = int.TryParse(globalMaxTokensSetting, out var max) ? max : config.MaxTokens;
-
-            // Check for guild-specific MaxTokens override
-            if (guildId.HasValue)
+            var guildSettings = await repository.GetGuildSettingsAsync(guildId.Value);
+            if (guildSettings?.MaxTokens.HasValue == true)
             {
-                var guildSettings = await repository.GetGuildSettingsAsync(guildId.Value);
-                if (guildSettings?.MaxTokens.HasValue == true)
-                {
-                    maxTokens = Math.Min(maxTokens, guildSettings.MaxTokens.Value);
-                }
+                maxTokens = Math.Min(maxTokens, guildSettings.MaxTokens.Value);
             }
+        }
 
-            var executionSettings = new OpenAIPromptExecutionSettings
+        var executionSettings = new OpenAIPromptExecutionSettings
+        {
+            Temperature = temperature,
+            MaxTokens = maxTokens
+        };
+
+        // Add reasoning_effort parameter if specified
+        if (!string.IsNullOrEmpty(reasoningEffort))
+        {
+            executionSettings.ExtensionData = new Dictionary<string, object>
             {
-                Temperature = temperature,
-                MaxTokens = maxTokens
+                ["reasoning_effort"] = reasoningEffort
             };
+            logger.Debug("Added reasoning_effort parameter: {ReasoningEffort}", reasoningEffort);
+        }
 
-            // Add reasoning_effort parameter if specified
-            if (!string.IsNullOrEmpty(reasoningEffort))
+        logger.Debug("Sending streaming request to LLM with {MessageCount} messages", chatHistory.Count);
+
+        await foreach (var message in chatService.GetStreamingChatMessageContentsAsync(
+            chatHistory,
+            executionSettings,
+            kernel,
+            cancellationToken))
+        {
+            // Try to extract metadata if available
+            if (message.Metadata != null)
             {
-                executionSettings.ExtensionData = new Dictionary<string, object>
+                // Extract token usage
+                if (message.Metadata.TryGetValue("Usage", out var usageObj))
                 {
-                    ["reasoning_effort"] = reasoningEffort
-                };
-                logger.Debug("Added reasoning_effort parameter: {ReasoningEffort}", reasoningEffort);
-            }
-
-            logger.Debug("Sending streaming request to LLM with {MessageCount} messages", chatHistory.Count);
-
-            await foreach (var message in chatService.GetStreamingChatMessageContentsAsync(
-                chatHistory,
-                executionSettings,
-                kernel,
-                linkedCts.Token))
-            {
-                // Try to extract metadata if available
-                if (message.Metadata != null)
-                {
-                    // Extract token usage
-                    if (message.Metadata.TryGetValue("Usage", out var usageObj))
+                    var usageDict = usageObj as IDictionary<string, object>;
+                    if (usageDict != null)
                     {
-                        var usageDict = usageObj as IDictionary<string, object>;
-                        if (usageDict != null)
-                        {
-                            if (usageDict.TryGetValue("prompt_tokens", out var pt))
-                                promptTokens = Convert.ToInt32(pt);
-                            else if (usageDict.TryGetValue("PromptTokens", out var pt2))
-                                promptTokens = Convert.ToInt32(pt2);
+                        if (usageDict.TryGetValue("prompt_tokens", out var pt))
+                            promptTokens = Convert.ToInt32(pt);
+                        else if (usageDict.TryGetValue("PromptTokens", out var pt2))
+                            promptTokens = Convert.ToInt32(pt2);
 
-                            if (usageDict.TryGetValue("completion_tokens", out var ct))
-                                completionTokens = Convert.ToInt32(ct);
-                            else if (usageDict.TryGetValue("CompletionTokens", out var ct2))
-                                completionTokens = Convert.ToInt32(ct2);
-                        }
-                        else if (usageObj != null)
-                        {
-                            var usageType = usageObj.GetType();
-                            
-                            var inputTokenProp = usageType.GetProperty("InputTokenCount") 
-                                ?? usageType.GetProperty("PromptTokens")
-                                ?? usageType.GetProperty("prompt_tokens");
-                            if (inputTokenProp != null)
-                            {
-                                var value = inputTokenProp.GetValue(usageObj);
-                                if (value != null)
-                                    promptTokens = Convert.ToInt32(value);
-                            }
-                            
-                            var outputTokenProp = usageType.GetProperty("OutputTokenCount")
-                                ?? usageType.GetProperty("CompletionTokens")
-                                ?? usageType.GetProperty("completion_tokens");
-                            if (outputTokenProp != null)
-                            {
-                                var value = outputTokenProp.GetValue(usageObj);
-                                if (value != null)
-                                    completionTokens = Convert.ToInt32(value);
-                            }
-                        }
+                        if (usageDict.TryGetValue("completion_tokens", out var ct))
+                            completionTokens = Convert.ToInt32(ct);
+                        else if (usageDict.TryGetValue("CompletionTokens", out var ct2))
+                            completionTokens = Convert.ToInt32(ct2);
                     }
-
-                    // Extract reasoning content if available
-                    if (message.Metadata.TryGetValue("Reasoning", out var reasoningObj))
+                    else if (usageObj != null)
                     {
-                        reasoning = reasoningObj?.ToString();
-                        if (!string.IsNullOrEmpty(reasoning))
+                        var usageType = usageObj.GetType();
+                        
+                        var inputTokenProp = usageType.GetProperty("InputTokenCount") 
+                            ?? usageType.GetProperty("PromptTokens")
+                            ?? usageType.GetProperty("prompt_tokens");
+                        if (inputTokenProp != null)
                         {
-                            logger.Debug("Received reasoning content: {Length} characters", reasoning.Length);
+                            var value = inputTokenProp.GetValue(usageObj);
+                            if (value != null)
+                                promptTokens = Convert.ToInt32(value);
                         }
-                    }
-                    else if (message.Metadata.TryGetValue("reasoning", out var reasoningObj2))
-                    {
-                        reasoning = reasoningObj2?.ToString();
-                        if (!string.IsNullOrEmpty(reasoning))
+                        
+                        var outputTokenProp = usageType.GetProperty("OutputTokenCount")
+                            ?? usageType.GetProperty("CompletionTokens")
+                            ?? usageType.GetProperty("completion_tokens");
+                        if (outputTokenProp != null)
                         {
-                            logger.Debug("Received reasoning content: {Length} characters", reasoning.Length);
+                            var value = outputTokenProp.GetValue(usageObj);
+                            if (value != null)
+                                completionTokens = Convert.ToInt32(value);
                         }
                     }
                 }
 
-                yield return (message.Content ?? "", reasoning, promptTokens, completionTokens);
+                // Extract reasoning content if available
+                if (message.Metadata.TryGetValue("Reasoning", out var reasoningObj))
+                {
+                    reasoning = reasoningObj?.ToString();
+                    if (!string.IsNullOrEmpty(reasoning))
+                    {
+                        logger.Debug("Received reasoning content: {Length} characters", reasoning.Length);
+                    }
+                }
+                else if (message.Metadata.TryGetValue("reasoning", out var reasoningObj2))
+                {
+                    reasoning = reasoningObj2?.ToString();
+                    if (!string.IsNullOrEmpty(reasoning))
+                    {
+                        logger.Debug("Received reasoning content: {Length} characters", reasoning.Length);
+                    }
+                }
             }
 
-            logger.Information("LLM streaming response completed. Prompt tokens: {PromptTokens}, Completion tokens: {CompletionTokens}",
-                promptTokens ?? 0, completionTokens ?? 0);
+            yield return (message.Content ?? "", reasoning, promptTokens, completionTokens);
         }
-        catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested)
-        {
-            logger.Error("LLM streaming request timed out after 10 minutes");
-            throw new TimeoutException("LLM streaming request timed out after 10 minutes");
-        }
-        finally
-        {
-            // Ensure final token counts are logged
-            if (promptTokens.HasValue || completionTokens.HasValue)
-            {
-                logger.Debug("Final token counts - Prompt: {PromptTokens}, Completion: {CompletionTokens}", 
-                    promptTokens ?? 0, completionTokens ?? 0);
-            }
-        }
+
+        logger.Information("LLM streaming response completed. Prompt tokens: {PromptTokens}, Completion tokens: {CompletionTokens}",
+            promptTokens ?? 0, completionTokens ?? 0);
     }
 
     /// <summary>

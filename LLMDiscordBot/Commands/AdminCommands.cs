@@ -80,7 +80,6 @@ public class AdminCommands(
 
     [Group("global", "全域管理命令（僅限 Bot 擁有者）")]
     public class GlobalAdminCommands(
-        TokenControlService tokenControl,
         IRepository repository,
         DiscordSocketClient client,
         ILogger logger) : InteractionModuleBase<SocketInteractionContext>
@@ -573,7 +572,6 @@ public class AdminCommands(
 
     [Group("guild", "伺服器管理命令")]
     public class GuildAdminCommands(
-        TokenControlService tokenControl,
         IRepository repository,
         DiscordSocketClient client,
         ILogger logger) : InteractionModuleBase<SocketInteractionContext>

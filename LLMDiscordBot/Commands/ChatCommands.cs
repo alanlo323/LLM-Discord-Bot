@@ -101,7 +101,6 @@ public class ChatCommands(
             var hasContent = false;
             Discord.IUserMessage? reasoningMessage = null;
             var interactionTimedOut = false;
-            var hasNotifiedTimeout = false;
 
             await foreach (var (content, reasoning, pTokens, cTokens) in llmService.GetChatCompletionStreamingAsync(chatHistory, guildId, reasoningEffort))
             {
