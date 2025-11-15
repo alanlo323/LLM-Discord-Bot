@@ -250,7 +250,7 @@ public class LLMService
     {
         int? promptTokens = null;
         int? completionTokens = null;
-        string? reasoning = null;
+        var reasoningAccumulator = new System.Text.StringBuilder();
 
         // Get settings from database if available
         var modelSetting = await repository.GetSettingAsync("Model");
@@ -339,26 +339,107 @@ public class LLMService
                     }
                 }
 
-                // Extract reasoning content if available
+                // Extract reasoning content from multiple possible sources
+                string? currentReasoningChunk = null;
+
+                // Try to get reasoning from metadata (standard approach)
                 if (message.Metadata.TryGetValue("Reasoning", out var reasoningObj))
                 {
-                    reasoning = reasoningObj?.ToString();
-                    if (!string.IsNullOrEmpty(reasoning))
-                    {
-                        logger.Debug("Received reasoning content: {Length} characters", reasoning.Length);
-                    }
+                    currentReasoningChunk = reasoningObj?.ToString();
                 }
                 else if (message.Metadata.TryGetValue("reasoning", out var reasoningObj2))
                 {
-                    reasoning = reasoningObj2?.ToString();
-                    if (!string.IsNullOrEmpty(reasoning))
+                    currentReasoningChunk = reasoningObj2?.ToString();
+                }
+                
+                // Try to extract from InnerContent if metadata doesn't have it
+                if (string.IsNullOrEmpty(currentReasoningChunk) && message.InnerContent != null)
+                {
+                    try
                     {
-                        logger.Debug("Received reasoning content: {Length} characters", reasoning.Length);
+                        // Try to access the raw delta object from InnerContent
+                        var innerContentType = message.InnerContent.GetType();
+                        
+                        // Look for a Reasoning or reasoning property in InnerContent
+                        var reasoningProp = innerContentType.GetProperty("Reasoning") 
+                            ?? innerContentType.GetProperty("reasoning");
+                        
+                        if (reasoningProp != null)
+                        {
+                            var reasoningValue = reasoningProp.GetValue(message.InnerContent);
+                            currentReasoningChunk = reasoningValue?.ToString();
+                        }
+                        
+                        // If still not found, try to access through RawRepresentation or similar
+                        if (string.IsNullOrEmpty(currentReasoningChunk))
+                        {
+                            var rawRepProp = innerContentType.GetProperty("RawRepresentation");
+                            if (rawRepProp != null)
+                            {
+                                var rawRep = rawRepProp.GetValue(message.InnerContent);
+                                if (rawRep != null)
+                                {
+                                    var rawRepType = rawRep.GetType();
+                                    var deltaChoicesProp = rawRepType.GetProperty("Choices") 
+                                        ?? rawRepType.GetProperty("choices");
+                                    
+                                    if (deltaChoicesProp != null)
+                                    {
+                                        var choices = deltaChoicesProp.GetValue(rawRep) as System.Collections.IEnumerable;
+                                        if (choices != null)
+                                        {
+                                            foreach (var choice in choices)
+                                            {
+                                                if (choice != null)
+                                                {
+                                                    var choiceType = choice.GetType();
+                                                    var deltaProp = choiceType.GetProperty("Delta") 
+                                                        ?? choiceType.GetProperty("delta");
+                                                    
+                                                    if (deltaProp != null)
+                                                    {
+                                                        var delta = deltaProp.GetValue(choice);
+                                                        if (delta != null)
+                                                        {
+                                                            var deltaType = delta.GetType();
+                                                            var deltaReasoningProp = deltaType.GetProperty("Reasoning") 
+                                                                ?? deltaType.GetProperty("reasoning");
+                                                            
+                                                            if (deltaReasoningProp != null)
+                                                            {
+                                                                var deltaReasoning = deltaReasoningProp.GetValue(delta);
+                                                                currentReasoningChunk = deltaReasoning?.ToString();
+                                                                break;
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
+                    catch (Exception ex)
+                    {
+                        logger.Debug(ex, "Failed to extract reasoning from InnerContent using reflection");
+                    }
+                }
+
+                // Accumulate reasoning chunks
+                if (!string.IsNullOrEmpty(currentReasoningChunk))
+                {
+                    reasoningAccumulator.Append(currentReasoningChunk);
+                    logger.Debug("Accumulated reasoning chunk: {Length} characters, Total: {Total}", 
+                        currentReasoningChunk.Length, reasoningAccumulator.Length);
                 }
             }
 
-            yield return (message.Content ?? "", reasoning, promptTokens, completionTokens);
+            yield return (message.Content ?? "", 
+                reasoningAccumulator.Length > 0 ? reasoningAccumulator.ToString() : null, 
+                promptTokens, 
+                completionTokens);
         }
 
         logger.Information("LLM streaming response completed. Prompt tokens: {PromptTokens}, Completion tokens: {CompletionTokens}",
