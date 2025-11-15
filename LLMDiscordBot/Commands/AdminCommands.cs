@@ -304,6 +304,99 @@ public class AdminCommands(
             }
         }
 
+        [SlashCommand("server-info", "查看 Bot 主機資訊")]
+        public async Task ServerInfoAsync()
+        {
+            if (!await RequireGlobalAdminAsync()) return;
+
+            try
+            {
+                await DeferAsync(ephemeral: true);
+
+                var embed = new EmbedBuilder()
+                    .WithColor(Color.Blue)
+                    .WithTitle("🖥️ Bot 主機資訊")
+                    .WithCurrentTimestamp();
+
+                // Get hostname
+                string hostname = System.Net.Dns.GetHostName();
+
+                // Get OS information
+                var osVersion = System.Environment.OSVersion;
+                string osInfo = $"{osVersion.Platform} {osVersion.Version}";
+
+                // Get uptime
+                long uptimeMs = System.Environment.TickCount64;
+                var uptime = TimeSpan.FromMilliseconds(uptimeMs);
+                string uptimeStr = $"{uptime.Days} 天 {uptime.Hours} 小時 {uptime.Minutes} 分鐘";
+
+                // Host information
+                embed.AddField("🖥️ 主機資訊",
+                    $"主機名稱：`{hostname}`\n" +
+                    $"作業系統：`{osInfo}`\n" +
+                    $"運行時間：`{uptimeStr}`",
+                    false);
+
+                // Get local IP addresses
+                var localIPs = new List<string>();
+                try
+                {
+                    var hostEntry = await System.Net.Dns.GetHostEntryAsync(hostname);
+                    foreach (var ip in hostEntry.AddressList)
+                    {
+                        // Filter IPv4 addresses
+                        if (ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork)
+                        {
+                            localIPs.Add(ip.ToString());
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    logger.Warning(ex, "Failed to get local IP addresses");
+                    localIPs.Add("無法取得");
+                }
+
+                string localIPsStr = localIPs.Any() ? string.Join("\n", localIPs.Select(ip => $"`{ip}`")) : "`無法取得`";
+
+                // Get public IP
+                string publicIP = "正在取得...";
+                try
+                {
+                    using var httpClient = new HttpClient();
+                    httpClient.Timeout = TimeSpan.FromSeconds(5);
+                    publicIP = await httpClient.GetStringAsync("https://api.ipify.org");
+                    publicIP = $"`{publicIP}`";
+                }
+                catch (Exception ex)
+                {
+                    logger.Warning(ex, "Failed to get public IP");
+                    publicIP = "`無法取得`";
+                }
+
+                // Network information
+                embed.AddField("🌐 網路資訊",
+                    $"**本地 IP 地址：**\n{localIPsStr}\n\n" +
+                    $"**公網 IP 地址：**\n{publicIP}",
+                    false);
+
+                // Runtime information
+                embed.AddField("⏱️ 運行狀態",
+                    $".NET 版本：`{System.Environment.Version}`\n" +
+                    $"處理器數量：`{System.Environment.ProcessorCount}`\n" +
+                    $"系統架構：`{System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture}`",
+                    false);
+
+                await FollowupAsync(embed: embed.Build(), ephemeral: true);
+                logger.Information("GlobalAdmin {AdminId} viewed server info", Context.User.Id);
+            }
+            catch (Exception ex)
+            {
+                logger.Error(ex, "Error viewing server info");
+                await FollowupAsync("發生錯誤，請稍後再試。", ephemeral: true);
+            }
+        }
+
         [SlashCommand("add-guild-admin", "新增伺服器管理員")]
         public async Task AddGuildAdminAsync(
             [Summary("guild-id", "伺服器 ID")]
