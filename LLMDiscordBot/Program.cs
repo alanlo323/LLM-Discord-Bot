@@ -74,6 +74,11 @@ class Program
                 services.AddHttpClient("TavilyMcp", client =>
                 {
                     client.Timeout = TimeSpan.FromSeconds(30);
+                    client.DefaultRequestHeaders.Accept.Clear();
+                    client.DefaultRequestHeaders.Accept.Add(
+                        new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
+                    client.DefaultRequestHeaders.Accept.Add(
+                        new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("text/event-stream"));
                 });
 
                 // Register Discord client with configuration

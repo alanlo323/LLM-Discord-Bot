@@ -36,7 +36,7 @@ public class McpService
     }
 
     /// <summary>
-    /// Search the web using Tavily MCP
+    /// Search the web using Tavily API
     /// </summary>
     public async Task<string> SearchAsync(string query, CancellationToken cancellationToken = default)
     {
@@ -44,57 +44,58 @@ public class McpService
         {
             logger.Information("Performing web search: {Query}", query);
 
-            // Build the request URL with the API key as query parameter
-            var requestUrl = $"?tavilyApiKey={Uri.EscapeDataString(config.ApiKey)}";
-
-            // Create the MCP request
-            var mcpRequest = new McpRequest
+            // Create the direct Tavily API request
+            var tavilyRequest = new TavilySearchRequest
             {
-                Method = "tools/call",
-                Params = new McpRequestParams
-                {
-                    Name = "tavily_search",
-                    Arguments = new TavilySearchArguments
-                    {
-                        Query = query
-                    }
-                }
+                Query = query,
+                IncludeRawContent = "markdown",
+                IncludeImages = true,
+                IncludeFavicon = true
             };
 
-            logger.Debug("Sending MCP request to Tavily: {Request}", JsonSerializer.Serialize(mcpRequest));
+            logger.Debug("Sending request to Tavily API: {Request}", JsonSerializer.Serialize(tavilyRequest));
 
-            var response = await httpClient.PostAsJsonAsync(requestUrl, mcpRequest, cancellationToken);
+            // Set authorization header
+            using var request = new HttpRequestMessage(HttpMethod.Post, config.Endpoint);
+            request.Headers.Add("Authorization", $"Bearer {config.ApiKey}");
+            request.Content = JsonContent.Create(tavilyRequest);
+
+            var response = await httpClient.SendAsync(request, cancellationToken);
 
             if (!response.IsSuccessStatusCode)
             {
                 var errorContent = await response.Content.ReadAsStringAsync(cancellationToken);
-                logger.Error("Tavily MCP request failed with status {StatusCode}: {Error}", 
+                logger.Error("Tavily API request failed with status {StatusCode}: {Error}", 
                     response.StatusCode, errorContent);
                 return $"Search failed: {response.StatusCode}";
             }
 
-            var mcpResponse = await response.Content.ReadFromJsonAsync<McpResponse>(cancellationToken: cancellationToken);
+            // Read the raw response content for debugging
+            var rawResponseContent = await response.Content.ReadAsStringAsync(cancellationToken);
+            logger.Debug("Raw response content: {RawContent}", rawResponseContent);
+            logger.Debug("Response headers: {Headers}", response.Headers.ToString());
+            logger.Debug("Content headers: {ContentHeaders}", response.Content.Headers.ToString());
 
-            if (mcpResponse?.Result?.Content == null || mcpResponse.Result.Content.Count == 0)
+            // Deserialize the response directly as TavilyResponse
+            var tavilyData = JsonSerializer.Deserialize<TavilyResponse>(rawResponseContent);
+
+            if (tavilyData?.Results == null || tavilyData.Results.Count == 0)
             {
-                logger.Warning("Tavily MCP returned empty response");
+                logger.Warning("Tavily API returned empty response");
                 return "No search results found.";
             }
 
-            // Extract text content from the response
-            var results = new List<string>();
-            foreach (var content in mcpResponse.Result.Content)
-            {
-                if (content.Type == "text" && !string.IsNullOrWhiteSpace(content.Text))
-                {
-                    results.Add(content.Text);
-                }
-            }
+            // Format the search results
+            var formattedResults = FormatSearchResults(tavilyData);
+            logger.Information("Web search completed successfully, returned {Count} results and {ImageCount} images", 
+                tavilyData.Results?.Count ?? 0, tavilyData.Images?.Count ?? 0);
 
-            var searchResults = string.Join("\n\n", results);
-            logger.Information("Web search completed successfully, returned {Count} results", results.Count);
-
-            return searchResults;
+            return formattedResults;
+        }
+        catch (JsonException ex)
+        {
+            logger.Error(ex, "JSON deserialization error during Tavily MCP search. This typically indicates the response is not valid JSON.");
+            return "Search error: Invalid response format received from search service. Please try again later.";
         }
         catch (HttpRequestException ex)
         {
@@ -112,9 +113,64 @@ public class McpService
             return $"Search error: {ex.Message}";
         }
     }
+
+    /// <summary>
+    /// Format search results for LLM consumption
+    /// </summary>
+    private string FormatSearchResults(TavilyResponse tavilyData)
+    {
+        var resultText = new System.Text.StringBuilder();
+        
+        resultText.AppendLine($"Search Query: {tavilyData.Query}");
+        resultText.AppendLine();
+
+        // Add images if available
+        if (tavilyData.Images != null && tavilyData.Images.Count > 0)
+        {
+            resultText.AppendLine("### Images:");
+            foreach (var imageUrl in tavilyData.Images.Take(5))
+            {
+                resultText.AppendLine($"- {imageUrl}");
+            }
+            resultText.AppendLine();
+        }
+
+        // Add search results
+        if (tavilyData.Results != null && tavilyData.Results.Count > 0)
+        {
+            resultText.AppendLine("### Search Results:");
+            resultText.AppendLine();
+
+            foreach (var result in tavilyData.Results)
+            {
+                resultText.AppendLine($"**{result.Title}**");
+                resultText.AppendLine($"URL: {result.Url}");
+                resultText.AppendLine($"Relevance Score: {result.Score:F2}");
+                resultText.AppendLine();
+                
+                // Use raw_content if available, otherwise use content
+                if (!string.IsNullOrWhiteSpace(result.RawContent))
+                {
+                    resultText.AppendLine(result.RawContent);
+                }
+                else if (!string.IsNullOrWhiteSpace(result.Content))
+                {
+                    resultText.AppendLine(result.Content);
+                }
+                
+                resultText.AppendLine();
+                resultText.AppendLine("---");
+                resultText.AppendLine();
+            }
+        }
+
+        return resultText.ToString();
+    }
 }
 
 #region MCP Protocol Models
+// NOTE: These MCP protocol classes are currently not in use but retained for future flexibility
+// if we need to switch back to using the MCP server instead of direct API calls.
 
 /// <summary>
 /// MCP request structure
@@ -159,6 +215,10 @@ public class TavilySearchArguments
 
     [JsonPropertyName("search_depth")]
     public string SearchDepth { get; set; } = "basic";
+    [JsonPropertyName("include_raw_content")]
+    public string IncludeRawContent { get; set; } = string.Empty;
+    [JsonPropertyName("include_images")]
+    public bool IncludeImage { get; set; } = false;
 }
 
 /// <summary>
@@ -198,6 +258,85 @@ public class McpContent
 
     [JsonPropertyName("text")]
     public string Text { get; set; } = string.Empty;
+}
+
+#endregion
+
+#region Tavily Request and Response Models
+
+/// <summary>
+/// Tavily search request structure
+/// </summary>
+public class TavilySearchRequest
+{
+    [JsonPropertyName("query")]
+    public string Query { get; set; } = string.Empty;
+
+    [JsonPropertyName("max_results")]
+    public int MaxResults { get; set; } = 5;
+
+    [JsonPropertyName("search_depth")]
+    public string SearchDepth { get; set; } = "basic";
+
+    [JsonPropertyName("include_raw_content")]
+    public string IncludeRawContent { get; set; } = string.Empty;
+
+    [JsonPropertyName("include_images")]
+    public bool IncludeImages { get; set; } = false;
+
+    [JsonPropertyName("include_favicon")]
+    public bool IncludeFavicon { get; set; } = false;
+}
+
+/// <summary>
+/// Tavily search response structure
+/// </summary>
+public class TavilyResponse
+{
+    [JsonPropertyName("query")]
+    public string Query { get; set; } = string.Empty;
+
+    [JsonPropertyName("follow_up_questions")]
+    public List<string>? FollowUpQuestions { get; set; }
+
+    [JsonPropertyName("answer")]
+    public string? Answer { get; set; }
+
+    [JsonPropertyName("images")]
+    public List<string> Images { get; set; } = new();
+
+    [JsonPropertyName("results")]
+    public List<TavilySearchResult> Results { get; set; } = new();
+
+    [JsonPropertyName("response_time")]
+    public double ResponseTime { get; set; }
+
+    [JsonPropertyName("request_id")]
+    public string RequestId { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// Individual Tavily search result
+/// </summary>
+public class TavilySearchResult
+{
+    [JsonPropertyName("url")]
+    public string Url { get; set; } = string.Empty;
+
+    [JsonPropertyName("title")]
+    public string Title { get; set; } = string.Empty;
+
+    [JsonPropertyName("content")]
+    public string Content { get; set; } = string.Empty;
+
+    [JsonPropertyName("score")]
+    public double Score { get; set; }
+
+    [JsonPropertyName("raw_content")]
+    public string? RawContent { get; set; }
+
+    [JsonPropertyName("favicon")]
+    public string? Favicon { get; set; }
 }
 
 #endregion
