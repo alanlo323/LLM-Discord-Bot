@@ -118,8 +118,9 @@ public class ChatCommands(
                     reasoningBuilder.Append(reasoning);
 
                     var now = DateTime.UtcNow;
-                    // Update reasoning message (rate limit: every 1 second)
-                    if ((now - lastReasoningUpdateTime).TotalSeconds >= 1.0 || reasoningMessage == null)
+                    // Update reasoning message (rate limit: every 2 seconds to avoid Discord API rate limits)
+                    // Discord allows 5 requests per 5 seconds, so 2 second interval is safe
+                    if ((now - lastReasoningUpdateTime).TotalSeconds >= 2.0 || reasoningMessage == null)
                     {
                         lastReasoningUpdateTime = now;
                         
@@ -171,9 +172,10 @@ public class ChatCommands(
                     if (pTokens.HasValue) promptTokens = pTokens.Value;
                     if (cTokens.HasValue) completionTokens = cTokens.Value;
 
-                    // Update Discord message every 1 second
+                    // Update Discord message every 2 seconds to avoid Discord API rate limits
+                    // Discord allows 5 requests per 5 seconds, so 2 second interval is safe
                     var now = DateTime.UtcNow;
-                    if ((now - lastUpdateTime).TotalSeconds >= 1.0)
+                    if ((now - lastUpdateTime).TotalSeconds >= 2.0)
                     {
                         lastUpdateTime = now;
                         var currentContent = responseBuilder.ToString();
