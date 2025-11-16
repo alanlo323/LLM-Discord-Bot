@@ -140,6 +140,9 @@ public class CommandHandlerService
             var avatarUrl = message.Author.GetAvatarUrl();
 
             IUserMessage? currentMessage = null;
+            var channelName = (message.Channel as SocketGuildChannel)?.Name ?? message.Channel.Name;
+            var guildName = (message.Channel as SocketGuildChannel)?.Guild?.Name;
+            var startTime = DateTime.UtcNow;
 
             await chatProcessor.ProcessChatRequestAsync(
                 userId,
@@ -149,6 +152,10 @@ public class CommandHandlerService
                 avatarUrl,
                 cleanedMessage,
                 reasoningEffort,
+                channelName,
+                guildName,
+                isSlashCommand: false,
+                startTime,
                 // sendInitialResponse
                 async (content, embed) =>
                 {

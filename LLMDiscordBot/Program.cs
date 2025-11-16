@@ -5,6 +5,8 @@ using Microsoft.EntityFrameworkCore;
 using Discord;
 using Discord.WebSocket;
 using Serilog;
+using Microsoft.SemanticKernel;
+using Microsoft.SemanticKernel.Connectors.OpenAI;
 using LLMDiscordBot.Configuration;
 using LLMDiscordBot.Data;
 using LLMDiscordBot.Services;
@@ -66,6 +68,7 @@ class Program
                 services.Configure<TokenLimitsConfig>(configuration.GetSection("TokenLimits"));
                 services.Configure<DatabaseConfig>(configuration.GetSection("Database"));
                 services.Configure<McpConfig>(configuration.GetSection("MCP"));
+                services.Configure<GraphRagConfig>(configuration.GetSection("GraphRag"));
 
                 // Register Serilog logger
                 services.AddSingleton(Log.Logger);
@@ -105,6 +108,34 @@ class Program
                 // Register repositories
                 services.AddScoped<IRepository, Repository>();
 
+                // Register GraphRag.Net services
+                try
+                {
+                    var graphRagConfig = configuration.GetSection("GraphRag").Get<GraphRagConfig>();
+                    if (graphRagConfig != null)
+                    {
+                        // Note: GraphRag.Net configuration is handled via appsettings.json
+                        // The library reads configuration automatically from the config file
+                        
+                        // Build GraphRag Kernel with Semantic Kernel
+                        var graphKernelBuilder = Microsoft.SemanticKernel.Kernel.CreateBuilder();
+                        graphKernelBuilder.AddOpenAIChatCompletion(
+                            modelId: graphRagConfig.OpenAI.ChatModel,
+                            apiKey: graphRagConfig.OpenAI.Key,
+                            endpoint: new Uri(graphRagConfig.OpenAI.EndPoint)
+                        );
+
+                        // Register GraphRag.Net with configured kernel
+                        services.AddGraphRagNet(graphKernelBuilder.Build());
+
+                        Log.Information("GraphRag.Net services registered successfully");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Log.Warning(ex, "Failed to register GraphRag.Net services. Memory features will be unavailable.");
+                }
+
                 // Register MCP services
                 services.AddSingleton<McpService>();
                 services.AddSingleton<TavilySearchPlugin>();
@@ -117,9 +148,15 @@ class Program
                 services.AddScoped<HabitLearningService>();  // Habit learning service
                 services.AddSingleton<UserRequestQueueService>();
 
+                // Register GraphRag memory services
+                services.AddScoped<GraphMemoryService>();
+                services.AddScoped<MemoryAnalyzerService>();
+                services.AddSingleton<MemoryExtractionBackgroundService>();
+
                 // Register hosted services
                 services.AddHostedService<DiscordBotService>();
                 services.AddHostedService<DailyCleanupService>();
+                services.AddHostedService(provider => provider.GetRequiredService<MemoryExtractionBackgroundService>());
             });
 
     static IConfiguration BuildConfiguration()
