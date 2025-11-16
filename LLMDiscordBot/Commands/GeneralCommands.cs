@@ -31,8 +31,11 @@ public class GeneralCommands(
             var isGlobalAdmin = await IsGlobalAdminAsync();
             var isGuildAdmin = guildId.HasValue && await repository.IsGuildAdminAsync(guildId.Value, userId);
 
+            // Normalize category for case-insensitive comparison
+            var normalizedCategory = category.ToLower();
+
             // Validate category access
-            if (category == "global-admin" && !isGlobalAdmin)
+            if (normalizedCategory == "global-admin" && !isGlobalAdmin)
             {
                 await FollowupAsync(
                     embed: new EmbedBuilder()
@@ -44,7 +47,7 @@ public class GeneralCommands(
                 return;
             }
 
-            if (category == "guild-admin" && !isGlobalAdmin && !isGuildAdmin)
+            if (normalizedCategory == "guild-admin" && !isGlobalAdmin && !isGuildAdmin)
             {
                 await FollowupAsync(
                     embed: new EmbedBuilder()
@@ -56,7 +59,7 @@ public class GeneralCommands(
                 return;
             }
 
-            var embed = category.ToLower() switch
+            var embed = normalizedCategory switch
             {
                 "chat" => BuildChatHelpEmbed(),
                 "memory" => BuildMemoryHelpEmbed(),
