@@ -9,21 +9,11 @@ namespace LLMDiscordBot.Commands;
 /// <summary>
 /// Chat commands for interacting with the LLM
 /// </summary>
-public class ChatCommands : InteractionModuleBase<SocketInteractionContext>
+public class ChatCommands(
+    ChatProcessorService chatProcessor,
+    IRepository repository,
+    ILogger logger) : InteractionModuleBase<SocketInteractionContext>
 {
-    private readonly ChatProcessorService chatProcessor;
-    private readonly IRepository repository;
-    private readonly ILogger logger;
-
-    public ChatCommands(
-        ChatProcessorService chatProcessor,
-        IRepository repository,
-        ILogger logger)
-    {
-        this.chatProcessor = chatProcessor;
-        this.repository = repository;
-        this.logger = logger;
-    }
 
     [SlashCommand("chat", "與 LLM 聊天")]
     public async Task ChatAsync(

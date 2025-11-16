@@ -117,7 +117,7 @@ public class McpService
     /// <summary>
     /// Format search results for LLM consumption
     /// </summary>
-    private string FormatSearchResults(TavilyResponse tavilyData)
+    private static string FormatSearchResults(TavilyResponse tavilyData)
     {
         var resultText = new System.Text.StringBuilder();
         
@@ -242,7 +242,7 @@ public class McpResponse
 public class McpResult
 {
     [JsonPropertyName("content")]
-    public List<McpContent> Content { get; set; } = new();
+    public List<McpContent> Content { get; set; } = [];
 
     [JsonPropertyName("isError")]
     public bool IsError { get; set; }
@@ -303,10 +303,10 @@ public class TavilyResponse
     public string? Answer { get; set; }
 
     [JsonPropertyName("images")]
-    public List<string> Images { get; set; } = new();
+    public List<string> Images { get; set; } = [];
 
     [JsonPropertyName("results")]
-    public List<TavilySearchResult> Results { get; set; } = new();
+    public List<TavilySearchResult> Results { get; set; } = [];
 
     [JsonPropertyName("response_time")]
     public double ResponseTime { get; set; }

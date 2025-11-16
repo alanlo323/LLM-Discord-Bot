@@ -65,7 +65,7 @@ public class UserCommands(
             var userId = Context.User.Id;
             var history = await repository.GetUserChatHistoryAsync(userId, count);
 
-            if (!history.Any())
+            if (history.Count == 0)
             {
                 await RespondAsync(
                     embed: new EmbedBuilder()
@@ -85,10 +85,10 @@ public class UserCommands(
             var description = "";
             foreach (var item in history)
             {
-                var roleIcon = item.Role.ToLower() == "user" ? "👤" : "🤖";
+                var roleIcon = item.Role.Equals("user", StringComparison.OrdinalIgnoreCase) ? "👤" : "🤖";
                 var timestamp = item.Timestamp.ToString("MM/dd HH:mm");
                 var preview = item.Content.Length > 100 
-                    ? item.Content.Substring(0, 100) + "..." 
+                    ? item.Content[..100] + "..." 
                     : item.Content;
 
                 description += $"**{roleIcon} {item.Role}** - {timestamp} ({item.TokenCount} tokens)\n";
@@ -115,7 +115,7 @@ public class UserCommands(
         }
     }
 
-    private string GenerateProgressBar(double percentage, int length)
+    private static string GenerateProgressBar(double percentage, int length)
     {
         var filled = (int)Math.Round(percentage / 100 * length);
         var empty = length - filled;

@@ -12,39 +12,18 @@ namespace LLMDiscordBot.Services;
 /// <summary>
 /// Service for processing chat requests from both slash commands and message mentions
 /// </summary>
-public class ChatProcessorService
+public class ChatProcessorService(
+    LLMService llmService,
+    TokenControlService tokenControl,
+    IRepository repository,
+    UserRequestQueueService requestQueue,
+    HabitLearningService habitLearning,
+    GraphMemoryService graphMemoryService,
+    MemoryExtractionBackgroundService memoryExtractionService,
+    IOptions<GraphRagConfig> graphRagConfig,
+    ILogger logger)
 {
-    private readonly LLMService llmService;
-    private readonly TokenControlService tokenControl;
-    private readonly IRepository repository;
-    private readonly UserRequestQueueService requestQueue;
-    private readonly HabitLearningService habitLearning;
-    private readonly GraphMemoryService graphMemoryService;
-    private readonly MemoryExtractionBackgroundService memoryExtractionService;
-    private readonly MemoryExtractionConfig memoryConfig;
-    private readonly ILogger logger;
-
-    public ChatProcessorService(
-        LLMService llmService,
-        TokenControlService tokenControl,
-        IRepository repository,
-        UserRequestQueueService requestQueue,
-        HabitLearningService habitLearning,
-        GraphMemoryService graphMemoryService,
-        MemoryExtractionBackgroundService memoryExtractionService,
-        IOptions<GraphRagConfig> graphRagConfig,
-        ILogger logger)
-    {
-        this.llmService = llmService;
-        this.tokenControl = tokenControl;
-        this.repository = repository;
-        this.requestQueue = requestQueue;
-        this.habitLearning = habitLearning;
-        this.graphMemoryService = graphMemoryService;
-        this.memoryExtractionService = memoryExtractionService;
-        this.memoryConfig = graphRagConfig.Value.MemoryExtraction;
-        this.logger = logger;
-    }
+    private readonly MemoryExtractionConfig memoryConfig = graphRagConfig.Value.MemoryExtraction;
 
     /// <summary>
     /// Process a chat request and stream the response
@@ -106,7 +85,7 @@ public class ChatProcessorService
             var globalSystemPrompt = await repository.GetSettingAsync("GlobalSystemPrompt") ?? "You are a helpful AI assistant.";
             var personalizedPrompt = await habitLearning.BuildPersonalizedPromptAsync(userId, globalSystemPrompt);
             var promptAddition = personalizedPrompt.StartsWith(globalSystemPrompt) 
-                ? personalizedPrompt.Substring(globalSystemPrompt.Length).TrimStart() 
+                ? personalizedPrompt[globalSystemPrompt.Length..].TrimStart() 
                 : personalizedPrompt;
 
             // Combine memory context with personalized prompt
@@ -444,7 +423,7 @@ public class ChatProcessorService
                     
                 // Get and display smart suggestions (if any) - based on updated habits
                 var suggestions = await habitLearning.GetSmartSuggestionsAsync(userId);
-                if (suggestions.Any())
+                if (suggestions.Count > 0)
                 {
                     var suggestionText = string.Join("\n", suggestions);
                     await sendFollowup(new EmbedBuilder()
@@ -473,7 +452,7 @@ public class ChatProcessorService
         }
     }
 
-    private async Task SendFinalResponseAsync(
+    private static async Task SendFinalResponseAsync(
         string response,
         string originalMessage,
         string username,
@@ -563,7 +542,7 @@ public class ChatProcessorService
         }
     }
 
-    private List<string> SplitMessage(string message, int maxLength)
+    private static List<string> SplitMessage(string message, int maxLength)
     {
         var chunks = new List<string>();
         var lines = message.Split('\n');
@@ -605,7 +584,7 @@ public class ChatProcessorService
         return chunks;
     }
 
-    private string SafeTruncate(string text, int maxLength, string ellipsis = "...")
+    private static string SafeTruncate(string text, int maxLength, string ellipsis = "...")
     {
         if (text.Length <= maxLength)
             return text;
@@ -619,10 +598,10 @@ public class ChatProcessorService
             targetLength--;
         }
 
-        return text.Substring(0, targetLength) + ellipsis;
+        return text[..targetLength] + ellipsis;
     }
 
-    private string SafeSubstring(string text, int startIndex, int length)
+    private static string SafeSubstring(string text, int startIndex, int length)
     {
         if (startIndex >= text.Length)
             return string.Empty;
@@ -639,7 +618,7 @@ public class ChatProcessorService
             endIndex--;
         }
 
-        return text.Substring(startIndex, endIndex - startIndex);
+        return text[startIndex..endIndex];
     }
 }
 

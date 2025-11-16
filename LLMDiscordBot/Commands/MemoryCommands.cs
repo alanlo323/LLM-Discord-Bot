@@ -49,7 +49,7 @@ public class MemoryCommands : InteractionModuleBase<SocketInteractionContext>
                 .WithColor(Color.Green)
                 .WithTitle("✅ 記憶已儲存")
                 .WithDescription($"已成功儲存到您的記憶圖譜中。\n\n**內容預覽：**\n{TruncateText(content, 200)}")
-                .WithFooter($"記憶索引: {graphMemoryService.GetUserMemoryIndex(userId, guildId)}")
+                .WithFooter($"記憶索引: {GraphMemoryService.GetUserMemoryIndex(userId, guildId)}")
                 .WithCurrentTimestamp()
                 .Build();
 
@@ -93,7 +93,7 @@ public class MemoryCommands : InteractionModuleBase<SocketInteractionContext>
                     .WithColor(Color.Blue)
                     .WithTitle($"🔍 記憶搜尋結果: {TruncateText(query, 50)}")
                     .WithDescription(TruncateText(result, 4000))
-                    .WithFooter($"記憶索引: {graphMemoryService.GetUserMemoryIndex(userId, guildId)}")
+                    .WithFooter($"記憶索引: {GraphMemoryService.GetUserMemoryIndex(userId, guildId)}")
                     .WithCurrentTimestamp()
                     .Build();
 
@@ -140,7 +140,7 @@ public class MemoryCommands : InteractionModuleBase<SocketInteractionContext>
 
             var indexes = await graphMemoryService.GetUserMemoryIndexesAsync(userId);
 
-            if (indexes.Any())
+            if (indexes.Count > 0)
             {
                 var embedBuilder = new EmbedBuilder()
                     .WithColor(Color.Purple)
@@ -206,7 +206,7 @@ public class MemoryCommands : InteractionModuleBase<SocketInteractionContext>
 
             if (scope == "current")
             {
-                var index = graphMemoryService.GetUserMemoryIndex(userId, guildId);
+                var index = GraphMemoryService.GetUserMemoryIndex(userId, guildId);
                 var hasContent = await graphMemoryService.CheckIfIndexHasContentAsync(index);
 
                 if (hasContent)
@@ -287,7 +287,7 @@ public class MemoryCommands : InteractionModuleBase<SocketInteractionContext>
         {
             var userId = Context.User.Id;
             var guildId = Context.Guild?.Id;
-            var index = graphMemoryService.GetUserMemoryIndex(userId, guildId);
+            var index = GraphMemoryService.GetUserMemoryIndex(userId, guildId);
 
             logger.Information("User {UserId} getting memory stats for index {Index}", userId, index);
 
@@ -339,12 +339,12 @@ public class MemoryCommands : InteractionModuleBase<SocketInteractionContext>
     /// <summary>
     /// Truncate text to maximum length
     /// </summary>
-    private string TruncateText(string text, int maxLength)
+    private static string TruncateText(string text, int maxLength)
     {
         if (string.IsNullOrEmpty(text) || text.Length <= maxLength)
             return text;
 
-        return text.Substring(0, maxLength - 3) + "...";
+        return text[..(maxLength - 3)] + "...";
     }
 }
 

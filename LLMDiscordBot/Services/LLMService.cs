@@ -125,8 +125,7 @@ public class LLMService
                     logger.Debug("Usage object type: {Type}", usageObj?.GetType().FullName ?? "null");
                     
                     // Try to parse usage information
-                    var usageDict = usageObj as IDictionary<string, object>;
-                    if (usageDict != null)
+                    if (usageObj is IDictionary<string, object> usageDict)
                     {
                         // Dictionary approach (for some API implementations)
                         if (usageDict.TryGetValue("prompt_tokens", out var pt))
@@ -139,7 +138,7 @@ public class LLMService
                         else if (usageDict.TryGetValue("CompletionTokens", out var ct2))
                             completionTokens = Convert.ToInt32(ct2);
                     }
-                    else if (usageObj != null)
+                    else if (usageObj is not null)
                     {
                         // Use reflection to get properties (for OpenAI.Chat.ChatTokenUsage and similar types)
                         var usageType = usageObj.GetType();
@@ -261,7 +260,6 @@ public class LLMService
         string? reasoning = null;
 
         // Get settings from database if available
-        var modelSetting = await repository.GetSettingAsync("Model");
         var temperatureSetting = await repository.GetSettingAsync("Temperature");
         var globalMaxTokensSetting = await repository.GetSettingAsync("GlobalMaxTokens");
 
@@ -309,8 +307,7 @@ public class LLMService
                 // Extract token usage
                 if (message.Metadata.TryGetValue("Usage", out var usageObj))
                 {
-                    var usageDict = usageObj as IDictionary<string, object>;
-                    if (usageDict != null)
+                    if (usageObj is IDictionary<string, object> usageDict)
                     {
                         if (usageDict.TryGetValue("prompt_tokens", out var pt))
                             promptTokens = Convert.ToInt32(pt);
@@ -322,7 +319,7 @@ public class LLMService
                         else if (usageDict.TryGetValue("CompletionTokens", out var ct2))
                             completionTokens = Convert.ToInt32(ct2);
                     }
-                    else if (usageObj != null)
+                    else if (usageObj is not null)
                     {
                         var usageType = usageObj.GetType();
                         
@@ -407,7 +404,7 @@ public class LLMService
     /// <summary>
     /// Estimate token count for a message (simple approximation)
     /// </summary>
-    public int EstimateTokenCount(string text)
+    public static int EstimateTokenCount(string text)
     {
         // Simple estimation: ~4 characters per token
         // This is a rough approximation; for accurate counts, use a proper tokenizer
@@ -463,7 +460,7 @@ public class LLMService
         var history = await repository.GetRecentChatHistoryAsync(userId, channelId, historyCount);
         foreach (var item in history)
         {
-            if (item.Role.ToLower() == "user")
+            if (item.Role.Equals("user", StringComparison.OrdinalIgnoreCase))
                 chatHistory.AddUserMessage(item.Content);
             else
                 chatHistory.AddAssistantMessage(item.Content);
@@ -532,7 +529,7 @@ public class LLMService
         
         // Get recent channel messages (all users)
         var channelHistory = await repository.GetChannelRecentChatHistoryAsync(channelId, 10);
-        if (channelHistory.Any())
+        if (channelHistory.Count > 0)
         {
             contextBuilder.AppendLine();
             contextBuilder.AppendLine($"Recent Channel Messages (last {channelHistory.Count}):");
@@ -540,12 +537,12 @@ public class LLMService
             foreach (var msg in channelHistory)
             {
                 var timestamp = msg.Timestamp.ToString("yyyy-MM-dd HH:mm:ss");
-                var role = msg.Role.ToLower() == "user" ? "User" : "Bot";
+                var role = msg.Role.Equals("user", StringComparison.OrdinalIgnoreCase) ? "User" : "Bot";
                 var userIdStr = msg.UserId.ToString();
                 
                 // Truncate long messages for context
                 var content = msg.Content.Length > 100 
-                    ? msg.Content.Substring(0, 97) + "..." 
+                    ? msg.Content[..97] + "..." 
                     : msg.Content;
                 
                 // Replace newlines in content to keep it compact

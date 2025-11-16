@@ -33,10 +33,7 @@ public class MemoryExtractionBackgroundService : BackgroundService
     /// </summary>
     public void QueueMemoryExtraction(MemoryExtractionTask task)
     {
-        if (task == null)
-        {
-            throw new ArgumentNullException(nameof(task));
-        }
+        ArgumentNullException.ThrowIfNull(task);
 
         var success = taskQueue.Writer.TryWrite(task);
         if (success)
@@ -154,7 +151,7 @@ public class MemoryExtractionTask
 {
     public ulong UserId { get; set; }
     public ulong? GuildId { get; set; }
-    public List<ChatMessage> RecentConversation { get; set; } = new();
+    public List<ChatMessage> RecentConversation { get; set; } = [];
 }
 
 

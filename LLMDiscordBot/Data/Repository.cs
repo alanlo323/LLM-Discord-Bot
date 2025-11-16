@@ -86,21 +86,15 @@ public class Repository(BotDbContext context, ILogger logger) : IRepository
                 try
                 {
                     // Attempt atomic UPDATE first
-                    int rowsAffected;
-                    if (guildId.HasValue)
-                    {
-                        rowsAffected = await context.Database.ExecuteSqlInterpolatedAsync(
+                    int rowsAffected = guildId.HasValue
+                        ? await context.Database.ExecuteSqlInterpolatedAsync(
                             $@"UPDATE TokenUsages 
                               SET TokensUsed = TokensUsed + {tokens}, MessageCount = MessageCount + 1 
-                              WHERE UserId = {userId} AND Date = {dateOnly} AND GuildId = {guildId.Value}");
-                    }
-                    else
-                    {
-                        rowsAffected = await context.Database.ExecuteSqlInterpolatedAsync(
+                              WHERE UserId = {userId} AND Date = {dateOnly} AND GuildId = {guildId.Value}")
+                        : await context.Database.ExecuteSqlInterpolatedAsync(
                             $@"UPDATE TokenUsages 
                               SET TokensUsed = TokensUsed + {tokens}, MessageCount = MessageCount + 1 
                               WHERE UserId = {userId} AND Date = {dateOnly} AND GuildId IS NULL");
-                    }
 
                     // If no rows were affected, the record doesn't exist - INSERT it
                     if (rowsAffected == 0)
@@ -324,7 +318,7 @@ public class Repository(BotDbContext context, ILogger logger) : IRepository
                 guild.MaxTokens = globalMaxTokens;
             }
 
-            if (adjustments.Any())
+            if (adjustments.Count > 0)
             {
                 guild.UpdatedAt = DateTime.UtcNow;
                 guild.UpdatedBy = "System (Global Limit Adjustment)";
@@ -334,7 +328,7 @@ public class Repository(BotDbContext context, ILogger logger) : IRepository
             }
         }
 
-        if (guildsToAdjust.Any())
+        if (guildsToAdjust.Count > 0)
         {
             await context.SaveChangesAsync();
         }

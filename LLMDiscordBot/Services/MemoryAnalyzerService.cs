@@ -10,21 +10,12 @@ namespace LLMDiscordBot.Services;
 /// <summary>
 /// Service for analyzing conversations and extracting memory-worthy content
 /// </summary>
-public class MemoryAnalyzerService
+public class MemoryAnalyzerService(
+    LLMService llmService,
+    ILogger logger,
+    IOptions<GraphRagConfig> graphRagConfig)
 {
-    private readonly LLMService llmService;
-    private readonly ILogger logger;
-    private readonly MemoryExtractionConfig config;
-
-    public MemoryAnalyzerService(
-        LLMService llmService,
-        ILogger logger,
-        IOptions<GraphRagConfig> graphRagConfig)
-    {
-        this.llmService = llmService;
-        this.logger = logger;
-        this.config = graphRagConfig.Value.MemoryExtraction;
-    }
+    private readonly MemoryExtractionConfig config = graphRagConfig.Value.MemoryExtraction;
 
     /// <summary>
     /// Analyze conversation and extract memory-worthy content
@@ -169,7 +160,7 @@ public class MemoryAnalyzerService
     /// <summary>
     /// Build conversation text from messages
     /// </summary>
-    private string BuildConversationText(List<ChatMessage> conversation)
+    private static string BuildConversationText(List<ChatMessage> conversation)
     {
         var sb = new StringBuilder();
         foreach (var msg in conversation)
@@ -183,35 +174,33 @@ public class MemoryAnalyzerService
     /// <summary>
     /// Extract entity names from text (simple keyword extraction)
     /// </summary>
-    private List<string> ExtractEntitiesFromText(string text)
+    private static List<string> ExtractEntitiesFromText(string text)
     {
         // Simple heuristic: look for capitalized words
-        var words = text.Split(new[] { ' ', '\n', '\r', ',', '.', '!', '?' }, 
+        var words = text.Split([' ', '\n', '\r', ',', '.', '!', '?'], 
             StringSplitOptions.RemoveEmptyEntries);
         
-        return words
+        return [.. words
             .Where(w => w.Length > 2 && char.IsUpper(w[0]))
             .Distinct()
-            .Take(10)
-            .ToList();
+            .Take(10)];
     }
+
+    private static readonly string[] CommonTopicWords = 
+    [
+        "programming", "code", "project", "work", "hobby", "preference",
+        "程式", "專案", "工作", "興趣", "喜好", "偏好"
+    ];
 
     /// <summary>
     /// Extract topic keywords from text
     /// </summary>
-    private List<string> ExtractTopicsFromText(string text)
+    private static List<string> ExtractTopicsFromText(string text)
     {
         // Simple heuristic: extract common nouns (this is a placeholder)
-        var commonTopicWords = new[]
-        {
-            "programming", "code", "project", "work", "hobby", "preference",
-            "程式", "專案", "工作", "興趣", "喜好", "偏好"
-        };
-
-        return commonTopicWords
+        return [.. CommonTopicWords
             .Where(t => text.Contains(t, StringComparison.OrdinalIgnoreCase))
-            .Distinct()
-            .ToList();
+            .Distinct()];
     }
 }
 
@@ -222,8 +211,8 @@ public class MemoryExtractionResult
 {
     public bool HasImportantContent { get; set; }
     public string? ExtractedContent { get; set; }
-    public List<string> Entities { get; set; } = new();
-    public List<string> Topics { get; set; } = new();
+    public List<string> Entities { get; set; } = [];
+    public List<string> Topics { get; set; } = [];
 }
 
 /// <summary>

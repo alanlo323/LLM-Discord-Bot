@@ -69,19 +69,17 @@ public class GraphMemoryService
     /// <summary>
     /// Generate index name for user memory in guild
     /// </summary>
-    public string GetUserMemoryIndex(ulong userId, ulong? guildId)
+    public static string GetUserMemoryIndex(ulong userId, ulong? guildId)
     {
-        if (guildId.HasValue)
-        {
-            return $"user_{userId}_guild_{guildId.Value}";
-        }
-        return $"user_{userId}_dm";
+        return guildId.HasValue
+            ? $"user_{userId}_guild_{guildId.Value}"
+            : $"user_{userId}_dm";
     }
 
     /// <summary>
     /// Generate index name for guild shared memory
     /// </summary>
-    public string GetGuildSharedMemoryIndex(ulong guildId)
+    public static string GetGuildSharedMemoryIndex(ulong guildId)
     {
         return $"guild_{guildId}_shared";
     }
@@ -93,7 +91,7 @@ public class GraphMemoryService
         ulong userId,
         ulong? guildId,
         string conversationText,
-        CancellationToken cancellationToken = default)
+        CancellationToken _ = default)
     {
         try
         {
@@ -104,7 +102,7 @@ public class GraphMemoryService
                 return;
             }
 
-            var index = GetUserMemoryIndex(userId, guildId);
+            var index = GraphMemoryService.GetUserMemoryIndex(userId, guildId);
             
             logger.Debug("Storing conversation memory to index {Index}", index);
 
@@ -132,7 +130,7 @@ public class GraphMemoryService
         ulong userId,
         ulong? guildId,
         string query,
-        CancellationToken cancellationToken = default)
+        CancellationToken _ = default)
     {
         try
         {
@@ -143,7 +141,7 @@ public class GraphMemoryService
                 return null;
             }
 
-            var index = GetUserMemoryIndex(userId, guildId);
+            var index = GraphMemoryService.GetUserMemoryIndex(userId, guildId);
 
             // Check if index exists and has content
             var hasContent = await CheckIfIndexHasContentAsync(index);
@@ -183,7 +181,7 @@ public class GraphMemoryService
         string userMessage,
         ulong userId,
         ulong? guildId,
-        CancellationToken cancellationToken = default)
+        CancellationToken _ = default)
     {
         try
         {
@@ -211,7 +209,7 @@ public class GraphMemoryService
             }
 
             // Check if memory index exists and has content
-            var index = GetUserMemoryIndex(userId, guildId);
+            var index = GraphMemoryService.GetUserMemoryIndex(userId, guildId);
             var hasMemories = await CheckIfIndexHasContentAsync(index);
 
             if (hasMemories)
@@ -244,7 +242,7 @@ public class GraphMemoryService
             }
 
             var allIndexes = (IEnumerable<string>)service.GetAllIndex();
-            var result = allIndexes.Any(i => i.Equals(index, StringComparison.OrdinalIgnoreCase));
+            var result = allIndexes.Contains(index, StringComparer.OrdinalIgnoreCase);
             return Task.FromResult(result);
         }
         catch (Exception ex)
@@ -332,7 +330,7 @@ public class GraphMemoryService
                 Index = index,
                 NodeCount = graphModel.Nodes?.Count ?? 0,
                 EdgeCount = graphModel.Edges?.Count ?? 0,
-                HasCommunities = graphModel.Communities?.Any() ?? false,
+                HasCommunities = (graphModel.Communities?.Count ?? 0) > 0,
                 CommunityCount = graphModel.Communities?.Count ?? 0
             };
             return Task.FromResult<MemoryStats?>(stats);

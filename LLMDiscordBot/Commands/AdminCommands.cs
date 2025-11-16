@@ -35,10 +35,7 @@ public class AdminCommands(
     /// </summary>
     private async Task<bool> IsGuildAdminAsync(ulong guildId)
     {
-        if (await IsGlobalAdminAsync())
-            return true;
-
-        return await repository.IsGuildAdminAsync(guildId, Context.User.Id);
+        return await IsGlobalAdminAsync() || await repository.IsGuildAdminAsync(guildId, Context.User.Id);
     }
 
     /// <summary>
@@ -176,7 +173,7 @@ public class AdminCommands(
                     .WithColor(Color.Orange)
                     .WithTitle("✅ 全域設定已更新")
                     .WithDescription($"已將全域最大回應 Token 數設定為 **{maxTokens:N0}**。\n\n" +
-                                   (adjustedGuilds.Any() 
+                                   (adjustedGuilds.Count > 0 
                                        ? $"**注意：** {adjustedGuilds.Count} 個伺服器的設定已自動調整。" 
                                        : "沒有伺服器需要調整設定。"))
                     .WithCurrentTimestamp()
@@ -185,7 +182,7 @@ public class AdminCommands(
                 await FollowupAsync(embed: embed);
 
                 // Send notifications to affected guilds
-                if (adjustedGuilds.Any())
+                if (adjustedGuilds.Count > 0)
                 {
                     _ = Task.Run(async () => await NotifyGuildsAboutAdjustmentsAsync(adjustedGuilds));
                 }
@@ -249,7 +246,7 @@ public class AdminCommands(
                     .WithTitle("✅ 全域設定已更新")
                     .WithDescription($"已將全域預設每日額度設定為 **{tokens:N0}** tokens。\n\n" +
                                    "**注意：** 此設定只影響新用戶，現有用戶的額度不會改變。\n" +
-                                   (adjustedGuilds.Any() 
+                                   (adjustedGuilds.Count > 0 
                                        ? $"{adjustedGuilds.Count} 個伺服器的設定已自動調整。" 
                                        : "沒有伺服器需要調整設定。"))
                     .WithCurrentTimestamp()
@@ -258,7 +255,7 @@ public class AdminCommands(
                 await FollowupAsync(embed: embed);
 
                 // Send notifications to affected guilds
-                if (adjustedGuilds.Any())
+                if (adjustedGuilds.Count > 0)
                 {
                     _ = Task.Run(async () => await NotifyGuildsAboutAdjustmentsAsync(adjustedGuilds));
                 }
@@ -289,7 +286,7 @@ public class AdminCommands(
                 foreach (var setting in settings.OrderBy(s => s.Key))
                 {
                     var value = setting.Value.Length > 100 
-                        ? setting.Value.Substring(0, 100) + "..." 
+                        ? setting.Value[..100] + "..." 
                         : setting.Value;
                     embed.AddField(setting.Key, $"`{value}`", true);
                 }
@@ -357,7 +354,7 @@ public class AdminCommands(
                     localIPs.Add("無法取得");
                 }
 
-                string localIPsStr = localIPs.Any() ? string.Join("\n", localIPs.Select(ip => $"`{ip}`")) : "`無法取得`";
+                string localIPsStr = localIPs.Count > 0 ? string.Join("\n", localIPs.Select(ip => $"`{ip}`")) : "`無法取得`";
 
                 // Get public IP
                 string publicIP = "正在取得...";
@@ -545,7 +542,7 @@ public class AdminCommands(
                     $"總訊息數：**{last30DaysTrend.Sum(t => t.MessageCount):N0}**",
                     inline: true);
 
-                if (topUsers.Any())
+                if (topUsers.Count > 0)
                 {
                     var topUsersText = string.Join("\n", topUsers.Select(u =>
                         $"{u.Rank}. <@{u.UserId}>: **{u.TokensUsed:N0}** tokens ({u.MessageCount} 則訊息)"));
@@ -556,7 +553,7 @@ public class AdminCommands(
                     embed.AddField("🏆 今日使用排行 (Top 5)", "今日尚無使用記錄", inline: false);
                 }
 
-                var trendChart7Days = CreateSimpleTrendChart(last7DaysTrend.TakeLast(7).ToList());
+                var trendChart7Days = CreateSimpleTrendChart([.. last7DaysTrend.TakeLast(7)]);
                 embed.AddField("📉 近 7 天使用趨勢", trendChart7Days, inline: false);
 
                 await FollowupAsync(embed: embed.Build());
@@ -569,9 +566,9 @@ public class AdminCommands(
             }
         }
 
-        private string CreateSimpleTrendChart(List<DailyTrend> trends)
+        private static string CreateSimpleTrendChart(List<DailyTrend> trends)
         {
-            if (!trends.Any())
+            if (trends.Count == 0)
                 return "無資料";
 
             var maxTokens = trends.Max(t => t.TokensUsed);
@@ -866,7 +863,7 @@ public class AdminCommands(
                     embed.AddField("系統提示", 
                         guildSettings.SystemPrompt != null && guildSettings.SystemPrompt.Length > 0
                             ? (guildSettings.SystemPrompt.Length > 100 
-                                ? guildSettings.SystemPrompt.Substring(0, 100) + "..." 
+                                ? guildSettings.SystemPrompt[..100] + "..." 
                                 : guildSettings.SystemPrompt)
                             : "（使用全域設定）", 
                         false);
@@ -897,10 +894,28 @@ public class AdminCommands(
                     embed.WithDescription("此伺服器尚未設定自訂設定，使用全域預設值。");
                 }
 
+                string globalSystemPromptValue = "無";
+                if (globalSettings.TryGetValue("GlobalSystemPrompt", out var globalSystemPrompt))
+                {
+                    globalSystemPromptValue = globalSystemPrompt.Length > 50 ? globalSystemPrompt[..50] + "..." : globalSystemPrompt;
+                }
+                
+                string globalDailyLimitValue = "無";
+                if (globalSettings.TryGetValue("GlobalDailyLimit", out var globalDailyLimit))
+                {
+                    globalDailyLimitValue = globalDailyLimit;
+                }
+                
+                string globalMaxTokensValue = "無";
+                if (globalSettings.TryGetValue("GlobalMaxTokens", out var globalMaxTokens))
+                {
+                    globalMaxTokensValue = globalMaxTokens;
+                }
+                
                 embed.AddField("\n📋 全域設定參考", 
-                    $"全域系統提示：`{(globalSettings.ContainsKey("GlobalSystemPrompt") ? (globalSettings["GlobalSystemPrompt"].Length > 50 ? globalSettings["GlobalSystemPrompt"].Substring(0, 50) + "..." : globalSettings["GlobalSystemPrompt"]) : "無")}`\n" +
-                    $"全域每日額度：`{(globalSettings.ContainsKey("GlobalDailyLimit") ? globalSettings["GlobalDailyLimit"] : "無")} tokens`\n" +
-                    $"全域最大 Token：`{(globalSettings.ContainsKey("GlobalMaxTokens") ? globalSettings["GlobalMaxTokens"] : "無")} tokens`",
+                    $"全域系統提示：`{globalSystemPromptValue}`\n" +
+                    $"全域每日額度：`{globalDailyLimitValue} tokens`\n" +
+                    $"全域最大 Token：`{globalMaxTokensValue} tokens`",
                     false);
 
                 await RespondAsync(embed: embed.Build());
@@ -928,7 +943,7 @@ public class AdminCommands(
                     .WithTitle($"👥 {Context.Guild.Name} 管理員列表")
                     .WithCurrentTimestamp();
 
-                if (admins.Any())
+                if (admins.Count > 0)
                 {
                     var adminList = string.Join("\n", admins.Select(a => 
                         $"<@{a.UserId}> - 新增於 {a.CreatedAt:yyyy-MM-dd} by {a.CreatedBy ?? "系統"}"));
@@ -1082,7 +1097,7 @@ public class AdminCommands(
                     true);
 
                 // Top users today
-                if (topUsers.Any())
+                if (topUsers.Count > 0)
                 {
                     var topUsersText = string.Join("\n", topUsers.Select(u =>
                         $"{u.Rank}. <@{u.UserId}>: **{u.TokensUsed:N0}** tokens ({u.MessageCount} 則)"));
@@ -1094,13 +1109,25 @@ public class AdminCommands(
                 }
 
                 // 7-day trend chart
-                var trendChart = CreateSimpleTrendChart(last7DaysTrend.TakeLast(7).ToList());
+                var trendChart = CreateSimpleTrendChart([.. last7DaysTrend.TakeLast(7)]);
                 embed.AddField("📉 近 7 天使用趨勢", trendChart, false);
 
                 // Global settings reference
+                string globalDailyLimitRef = "未設定";
+                if (globalSettings.TryGetValue("GlobalDailyLimit", out var globalDailyLimitRefValue))
+                {
+                    globalDailyLimitRef = globalDailyLimitRefValue;
+                }
+                
+                string globalMaxTokensRef = "未設定";
+                if (globalSettings.TryGetValue("GlobalMaxTokens", out var globalMaxTokensRefValue))
+                {
+                    globalMaxTokensRef = globalMaxTokensRefValue;
+                }
+                
                 embed.AddField("🌐 全域設定參考",
-                    $"全域每日額度: `{(globalSettings.ContainsKey("GlobalDailyLimit") ? globalSettings["GlobalDailyLimit"] : "未設定")} tokens`\n" +
-                    $"全域最大 Token: `{(globalSettings.ContainsKey("GlobalMaxTokens") ? globalSettings["GlobalMaxTokens"] : "未設定")} tokens`",
+                    $"全域每日額度: `{globalDailyLimitRef} tokens`\n" +
+                    $"全域最大 Token: `{globalMaxTokensRef} tokens`",
                     false);
 
                 await FollowupAsync(embed: embed.Build());
@@ -1114,9 +1141,9 @@ public class AdminCommands(
             }
         }
 
-        private string CreateSimpleTrendChart(List<DailyTrend> trends)
+        private static string CreateSimpleTrendChart(List<DailyTrend> trends)
         {
-            if (!trends.Any())
+            if (trends.Count == 0)
                 return "無資料";
 
             var maxTokens = trends.Max(t => t.TokensUsed);

@@ -11,19 +11,10 @@ namespace LLMDiscordBot.Services;
 /// <summary>
 /// Service for handling Discord slash commands and message mentions
 /// </summary>
-public class CommandHandlerService
+public partial class CommandHandlerService(IServiceProvider services, ILogger logger)
 {
-    private readonly IServiceProvider services;
-    private readonly InteractionService interactionService;
-    private readonly ILogger logger;
+    private readonly InteractionService interactionService = new(services.GetRequiredService<DiscordSocketClient>());
     private DiscordSocketClient? client;
-
-    public CommandHandlerService(IServiceProvider services, ILogger logger)
-    {
-        this.services = services;
-        this.logger = logger;
-        this.interactionService = new InteractionService(services.GetRequiredService<DiscordSocketClient>());
-    }
 
     public async Task InitializeAsync(DiscordSocketClient client)
     {
@@ -159,10 +150,7 @@ public class CommandHandlerService
                 // sendInitialResponse
                 async (content, embed) =>
                 {
-                    if (currentMessage == null)
-                    {
-                        currentMessage = await message.ReplyAsync(text: content, embed: embed);
-                    }
+                    currentMessage ??= await message.ReplyAsync(text: content, embed: embed);
                     return currentMessage;
                 },
                 // updateResponse
@@ -198,13 +186,13 @@ public class CommandHandlerService
     /// Parse message content to extract reasoning effort parameter and clean message
     /// Format: @Bot [low|medium|high] your message here
     /// </summary>
-    private (string cleanedMessage, string reasoningEffort) ParseMessageContent(string content)
+    private static (string cleanedMessage, string reasoningEffort) ParseMessageContent(string content)
     {
         // Remove bot mentions
-        var cleanedContent = Regex.Replace(content, @"<@!?\d+>", "").Trim();
+        var cleanedContent = BotMentionRegex().Replace(content, "").Trim();
 
         // Extract reasoning effort if present
-        var reasoningMatch = Regex.Match(cleanedContent, @"\[(low|medium|high)\]", RegexOptions.IgnoreCase);
+        var reasoningMatch = ReasoningEffortRegex().Match(cleanedContent);
         var reasoningEffort = "medium"; // default
 
         if (reasoningMatch.Success)
@@ -216,5 +204,11 @@ public class CommandHandlerService
 
         return (cleanedContent, reasoningEffort);
     }
+
+    [GeneratedRegex(@"<@!?\d+>")]
+    private static partial Regex BotMentionRegex();
+
+    [GeneratedRegex(@"\[(low|medium|high)\]", RegexOptions.IgnoreCase)]
+    private static partial Regex ReasoningEffortRegex();
 }
 
