@@ -14,10 +14,14 @@ public class DiscordConfig
 public class LLMConfig
 {
     public string ApiEndpoint { get; set; } = string.Empty;
-    public string Model { get; set; } = "default";
+    public string Model { get; set; }
     public double Temperature { get; set; } = 0.7;
     public int MaxTokens { get; set; } = 2000;
-    public string SystemPrompt { get; set; } = "You are a helpful AI assistant.";
+    public string SystemPrompt { get; set; }
+    public string BotName { get; set; }
+    public string RoleBackground { get; set; }
+    public string LanguagePreference { get; set; }
+    public string StyleDescription { get; set; }
 }
 
 /// <summary>

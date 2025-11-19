@@ -11,8 +11,8 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace LLMDiscordBot.Migrations
 {
     [DbContext(typeof(BotDbContext))]
-    [Migration("20251115144608_AddGuildIdToTokenUsageAndChatHistory")]
-    partial class AddGuildIdToTokenUsageAndChatHistory
+    [Migration("20251119171907_InitialCreate")]
+    partial class InitialCreate
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -46,31 +46,25 @@ namespace LLMDiscordBot.Migrations
                         new
                         {
                             Key = "Model",
-                            UpdatedAt = new DateTime(2025, 11, 15, 14, 46, 7, 549, DateTimeKind.Utc).AddTicks(4082),
+                            UpdatedAt = new DateTime(2025, 11, 19, 17, 19, 7, 29, DateTimeKind.Utc).AddTicks(2178),
                             Value = "default"
                         },
                         new
                         {
                             Key = "Temperature",
-                            UpdatedAt = new DateTime(2025, 11, 15, 14, 46, 7, 549, DateTimeKind.Utc).AddTicks(4083),
+                            UpdatedAt = new DateTime(2025, 11, 19, 17, 19, 7, 29, DateTimeKind.Utc).AddTicks(2180),
                             Value = "0.7"
                         },
                         new
                         {
                             Key = "GlobalMaxTokens",
-                            UpdatedAt = new DateTime(2025, 11, 15, 14, 46, 7, 549, DateTimeKind.Utc).AddTicks(4084),
+                            UpdatedAt = new DateTime(2025, 11, 19, 17, 19, 7, 29, DateTimeKind.Utc).AddTicks(2181),
                             Value = "2000"
                         },
                         new
                         {
-                            Key = "GlobalSystemPrompt",
-                            UpdatedAt = new DateTime(2025, 11, 15, 14, 46, 7, 549, DateTimeKind.Utc).AddTicks(4085),
-                            Value = "You are a helpful AI assistant."
-                        },
-                        new
-                        {
                             Key = "GlobalDailyLimit",
-                            UpdatedAt = new DateTime(2025, 11, 15, 14, 46, 7, 549, DateTimeKind.Utc).AddTicks(4086),
+                            UpdatedAt = new DateTime(2025, 11, 19, 17, 19, 7, 29, DateTimeKind.Utc).AddTicks(2183),
                             Value = "100000"
                         });
                 });
@@ -106,6 +100,8 @@ namespace LLMDiscordBot.Migrations
                         .HasColumnType("INTEGER");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("GuildId");
 
                     b.HasIndex("UserId", "ChannelId", "Timestamp");
 
@@ -176,6 +172,59 @@ namespace LLMDiscordBot.Migrations
                     b.ToTable("GuildSettings");
                 });
 
+            modelBuilder.Entity("LLMDiscordBot.Models.InteractionLog", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("CommandType")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<ulong?>("GuildId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("MessageLength")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Metadata")
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("ResponseLength")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<TimeSpan>("ResponseTime")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("Timestamp")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("TopicCategory")
+                        .HasMaxLength(50)
+                        .HasColumnType("TEXT");
+
+                    b.Property<ulong>("UserId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("UserSatisfied")
+                        .HasColumnType("INTEGER");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CommandType");
+
+                    b.HasIndex("GuildId");
+
+                    b.HasIndex("Timestamp");
+
+                    b.HasIndex("UserId", "Timestamp");
+
+                    b.ToTable("InteractionLogs");
+                });
+
             modelBuilder.Entity("LLMDiscordBot.Models.TokenUsage", b =>
                 {
                     b.Property<int>("Id")
@@ -202,7 +251,11 @@ namespace LLMDiscordBot.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("UserId", "Date")
+                    b.HasIndex("Date");
+
+                    b.HasIndex("GuildId");
+
+                    b.HasIndex("UserId", "GuildId", "Date")
                         .IsUnique();
 
                     b.ToTable("TokenUsages");
@@ -235,6 +288,86 @@ namespace LLMDiscordBot.Migrations
                     b.ToTable("Users");
                 });
 
+            modelBuilder.Entity("LLMDiscordBot.Models.UserPreferences", b =>
+                {
+                    b.Property<ulong>("UserId")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<double>("AverageMessageLength")
+                        .HasColumnType("REAL");
+
+                    b.Property<TimeSpan?>("AverageSessionDuration")
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("ConsecutiveDays")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("CustomSystemPrompt")
+                        .HasMaxLength(1000)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("EnableSmartSuggestions")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("FavoriteCommands")
+                        .HasMaxLength(500)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime?>("LastInteractionAt")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("MostUsedTopics")
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("PreferCodeExamples")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("PreferStepByStep")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<bool>("PreferVisualContent")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("PreferredLanguage")
+                        .HasMaxLength(50)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int?>("PreferredMaxTokens")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("PreferredResponseStyle")
+                        .HasMaxLength(50)
+                        .HasColumnType("TEXT");
+
+                    b.Property<double?>("PreferredTemperature")
+                        .HasColumnType("REAL");
+
+                    b.Property<string>("PreferredTimeZone")
+                        .HasMaxLength(50)
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("RememberConversationContext")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("TotalInteractions")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("UserId");
+
+                    b.HasIndex("LastInteractionAt");
+
+                    b.HasIndex("UpdatedAt");
+
+                    b.ToTable("UserPreferences");
+                });
+
             modelBuilder.Entity("LLMDiscordBot.Models.ChatHistory", b =>
                 {
                     b.HasOne("LLMDiscordBot.Models.User", "User")
@@ -251,6 +384,17 @@ namespace LLMDiscordBot.Migrations
                     b.HasOne("LLMDiscordBot.Models.User", "User")
                         .WithMany("TokenUsages")
                         .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("LLMDiscordBot.Models.UserPreferences", b =>
+                {
+                    b.HasOne("LLMDiscordBot.Models.User", "User")
+                        .WithOne()
+                        .HasForeignKey("LLMDiscordBot.Models.UserPreferences", "UserId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 

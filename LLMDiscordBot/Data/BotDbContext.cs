@@ -113,7 +113,7 @@ public class BotDbContext : DbContext
             new BotSettings { Key = "Model", Value = "default", UpdatedAt = DateTime.UtcNow },
             new BotSettings { Key = "Temperature", Value = "0.7", UpdatedAt = DateTime.UtcNow },
             new BotSettings { Key = "GlobalMaxTokens", Value = "2000", UpdatedAt = DateTime.UtcNow },
-            new BotSettings { Key = "GlobalSystemPrompt", Value = "You are a helpful AI assistant.", UpdatedAt = DateTime.UtcNow },
+            //new BotSettings { Key = "GlobalSystemPrompt", Value = "You are a helpful AI assistant.", UpdatedAt = DateTime.UtcNow },
             new BotSettings { Key = "GlobalDailyLimit", Value = "100000", UpdatedAt = DateTime.UtcNow }
         );
     }

@@ -62,6 +62,28 @@ namespace LLMDiscordBot.Migrations
                 });
 
             migrationBuilder.CreateTable(
+                name: "InteractionLogs",
+                columns: table => new
+                {
+                    Id = table.Column<long>(type: "INTEGER", nullable: false)
+                        .Annotation("Sqlite:Autoincrement", true),
+                    UserId = table.Column<ulong>(type: "INTEGER", nullable: false),
+                    GuildId = table.Column<ulong>(type: "INTEGER", nullable: true),
+                    CommandType = table.Column<string>(type: "TEXT", maxLength: 100, nullable: false),
+                    MessageLength = table.Column<int>(type: "INTEGER", nullable: false),
+                    ResponseLength = table.Column<int>(type: "INTEGER", nullable: false),
+                    ResponseTime = table.Column<TimeSpan>(type: "TEXT", nullable: false),
+                    TopicCategory = table.Column<string>(type: "TEXT", maxLength: 50, nullable: true),
+                    UserSatisfied = table.Column<bool>(type: "INTEGER", nullable: false),
+                    Timestamp = table.Column<DateTime>(type: "TEXT", nullable: false),
+                    Metadata = table.Column<string>(type: "TEXT", maxLength: 500, nullable: true)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_InteractionLogs", x => x.Id);
+                });
+
+            migrationBuilder.CreateTable(
                 name: "Users",
                 columns: table => new
                 {
@@ -84,6 +106,7 @@ namespace LLMDiscordBot.Migrations
                     Id = table.Column<int>(type: "INTEGER", nullable: false)
                         .Annotation("Sqlite:Autoincrement", true),
                     UserId = table.Column<ulong>(type: "INTEGER", nullable: false),
+                    GuildId = table.Column<ulong>(type: "INTEGER", nullable: true),
                     ChannelId = table.Column<ulong>(type: "INTEGER", nullable: false),
                     Role = table.Column<string>(type: "TEXT", maxLength: 50, nullable: false),
                     Content = table.Column<string>(type: "TEXT", nullable: false),
@@ -108,6 +131,7 @@ namespace LLMDiscordBot.Migrations
                     Id = table.Column<int>(type: "INTEGER", nullable: false)
                         .Annotation("Sqlite:Autoincrement", true),
                     UserId = table.Column<ulong>(type: "INTEGER", nullable: false),
+                    GuildId = table.Column<ulong>(type: "INTEGER", nullable: true),
                     Date = table.Column<DateTime>(type: "TEXT", nullable: false),
                     TokensUsed = table.Column<int>(type: "INTEGER", nullable: false),
                     MessageCount = table.Column<int>(type: "INTEGER", nullable: false),
@@ -124,22 +148,63 @@ namespace LLMDiscordBot.Migrations
                         onDelete: ReferentialAction.Cascade);
                 });
 
+            migrationBuilder.CreateTable(
+                name: "UserPreferences",
+                columns: table => new
+                {
+                    UserId = table.Column<ulong>(type: "INTEGER", nullable: false),
+                    PreferredLanguage = table.Column<string>(type: "TEXT", maxLength: 50, nullable: true),
+                    PreferredTemperature = table.Column<double>(type: "REAL", nullable: true),
+                    PreferredMaxTokens = table.Column<int>(type: "INTEGER", nullable: true),
+                    PreferredResponseStyle = table.Column<string>(type: "TEXT", maxLength: 50, nullable: true),
+                    CustomSystemPrompt = table.Column<string>(type: "TEXT", maxLength: 1000, nullable: true),
+                    TotalInteractions = table.Column<int>(type: "INTEGER", nullable: false),
+                    AverageMessageLength = table.Column<double>(type: "REAL", nullable: false),
+                    MostUsedTopics = table.Column<string>(type: "TEXT", maxLength: 100, nullable: true),
+                    PreferredTimeZone = table.Column<string>(type: "TEXT", maxLength: 50, nullable: true),
+                    EnableSmartSuggestions = table.Column<bool>(type: "INTEGER", nullable: false),
+                    RememberConversationContext = table.Column<bool>(type: "INTEGER", nullable: false),
+                    LastInteractionAt = table.Column<DateTime>(type: "TEXT", nullable: true),
+                    ConsecutiveDays = table.Column<int>(type: "INTEGER", nullable: false),
+                    AverageSessionDuration = table.Column<TimeSpan>(type: "TEXT", nullable: true),
+                    FavoriteCommands = table.Column<string>(type: "TEXT", maxLength: 500, nullable: true),
+                    PreferCodeExamples = table.Column<bool>(type: "INTEGER", nullable: false),
+                    PreferStepByStep = table.Column<bool>(type: "INTEGER", nullable: false),
+                    PreferVisualContent = table.Column<bool>(type: "INTEGER", nullable: false),
+                    CreatedAt = table.Column<DateTime>(type: "TEXT", nullable: false),
+                    UpdatedAt = table.Column<DateTime>(type: "TEXT", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("PK_UserPreferences", x => x.UserId);
+                    table.ForeignKey(
+                        name: "FK_UserPreferences_Users_UserId",
+                        column: x => x.UserId,
+                        principalTable: "Users",
+                        principalColumn: "UserId",
+                        onDelete: ReferentialAction.Cascade);
+                });
+
             migrationBuilder.InsertData(
                 table: "BotSettings",
                 columns: new[] { "Key", "UpdatedAt", "UpdatedBy", "Value" },
                 values: new object[,]
                 {
-                    { "GlobalDailyLimit", new DateTime(2025, 11, 15, 14, 0, 4, 908, DateTimeKind.Utc).AddTicks(1145), null, "100000" },
-                    { "GlobalMaxTokens", new DateTime(2025, 11, 15, 14, 0, 4, 908, DateTimeKind.Utc).AddTicks(1143), null, "2000" },
-                    { "GlobalSystemPrompt", new DateTime(2025, 11, 15, 14, 0, 4, 908, DateTimeKind.Utc).AddTicks(1144), null, "You are a helpful AI assistant." },
-                    { "Model", new DateTime(2025, 11, 15, 14, 0, 4, 908, DateTimeKind.Utc).AddTicks(1141), null, "default" },
-                    { "Temperature", new DateTime(2025, 11, 15, 14, 0, 4, 908, DateTimeKind.Utc).AddTicks(1142), null, "0.7" }
+                    { "GlobalDailyLimit", new DateTime(2025, 11, 19, 17, 19, 7, 29, DateTimeKind.Utc).AddTicks(2183), null, "100000" },
+                    { "GlobalMaxTokens", new DateTime(2025, 11, 19, 17, 19, 7, 29, DateTimeKind.Utc).AddTicks(2181), null, "2000" },
+                    { "Model", new DateTime(2025, 11, 19, 17, 19, 7, 29, DateTimeKind.Utc).AddTicks(2178), null, "default" },
+                    { "Temperature", new DateTime(2025, 11, 19, 17, 19, 7, 29, DateTimeKind.Utc).AddTicks(2180), null, "0.7" }
                 });
 
             migrationBuilder.CreateIndex(
                 name: "IX_BotSettings_UpdatedAt",
                 table: "BotSettings",
                 column: "UpdatedAt");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_ChatHistories_GuildId",
+                table: "ChatHistories",
+                column: "GuildId");
 
             migrationBuilder.CreateIndex(
                 name: "IX_ChatHistories_UserId_ChannelId_Timestamp",
@@ -168,10 +233,50 @@ namespace LLMDiscordBot.Migrations
                 column: "UpdatedAt");
 
             migrationBuilder.CreateIndex(
-                name: "IX_TokenUsages_UserId_Date",
+                name: "IX_InteractionLogs_CommandType",
+                table: "InteractionLogs",
+                column: "CommandType");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_InteractionLogs_GuildId",
+                table: "InteractionLogs",
+                column: "GuildId");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_InteractionLogs_Timestamp",
+                table: "InteractionLogs",
+                column: "Timestamp");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_InteractionLogs_UserId_Timestamp",
+                table: "InteractionLogs",
+                columns: new[] { "UserId", "Timestamp" });
+
+            migrationBuilder.CreateIndex(
+                name: "IX_TokenUsages_Date",
                 table: "TokenUsages",
-                columns: new[] { "UserId", "Date" },
+                column: "Date");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_TokenUsages_GuildId",
+                table: "TokenUsages",
+                column: "GuildId");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_TokenUsages_UserId_GuildId_Date",
+                table: "TokenUsages",
+                columns: new[] { "UserId", "GuildId", "Date" },
                 unique: true);
+
+            migrationBuilder.CreateIndex(
+                name: "IX_UserPreferences_LastInteractionAt",
+                table: "UserPreferences",
+                column: "LastInteractionAt");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_UserPreferences_UpdatedAt",
+                table: "UserPreferences",
+                column: "UpdatedAt");
 
             migrationBuilder.CreateIndex(
                 name: "IX_Users_CreatedAt",
@@ -200,7 +305,13 @@ namespace LLMDiscordBot.Migrations
                 name: "GuildSettings");
 
             migrationBuilder.DropTable(
+                name: "InteractionLogs");
+
+            migrationBuilder.DropTable(
                 name: "TokenUsages");
+
+            migrationBuilder.DropTable(
+                name: "UserPreferences");
 
             migrationBuilder.DropTable(
                 name: "Users");

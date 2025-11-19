@@ -429,6 +429,14 @@ public class LLMService
 
         // Add system message: GlobalSystemPrompt first, then Guild SystemPrompt, then User personalization
         var globalSystemPrompt = await repository.GetSettingAsync("GlobalSystemPrompt") ?? config.SystemPrompt;
+        
+        // Replace placeholders in system prompt with configured values
+        globalSystemPrompt = globalSystemPrompt
+            .Replace("{BotName}", config.BotName)
+            .Replace("{RoleBackground}", config.RoleBackground)
+            .Replace("{LanguagePreference}", config.LanguagePreference)
+            .Replace("{StyleDescription}", config.StyleDescription);
+
         var systemPrompt = globalSystemPrompt;
 
         // Append guild-specific system prompt if available
