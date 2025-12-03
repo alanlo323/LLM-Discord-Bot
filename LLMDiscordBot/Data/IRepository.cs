@@ -73,5 +73,27 @@ public interface IRepository
     Task<List<InteractionLog>> GetUserInteractionHistoryAsync(ulong userId, int count);
     Task<Dictionary<string, int>> GetUserCommandFrequencyAsync(ulong userId, DateTime since);
     Task<List<string>> GetUserTopTopicsAsync(ulong userId, int count);
+
+    // Task orchestration operations
+    Task<TaskSession?> GetTaskSessionAsync(Guid sessionId);
+    Task<List<TaskSession>> GetUserTaskSessionsAsync(ulong userId, int count, bool includeArchived = false);
+    Task<TaskSession> AddTaskSessionAsync(TaskSession session);
+    Task UpdateTaskSessionAsync(TaskSession session);
+
+    Task<List<TaskPlanStep>> GetTaskPlanStepsAsync(Guid sessionId);
+    Task<TaskPlanStep?> GetTaskPlanStepAsync(Guid stepId);
+    Task AddTaskPlanStepAsync(TaskPlanStep step);
+    Task UpdateTaskPlanStepAsync(TaskPlanStep step);
+
+    Task<ActionApprovalLog?> GetApprovalLogAsync(Guid approvalId);
+    Task<ActionApprovalLog> AddApprovalLogAsync(ActionApprovalLog log);
+    Task UpdateApprovalLogAsync(ActionApprovalLog log);
+    Task<List<ActionApprovalLog>> GetPendingApprovalsAsync(ulong approverUserId, int count = 20);
+
+    Task<MonitoredTask?> GetMonitoredTaskAsync(Guid monitorId);
+    Task AddMonitoredTaskAsync(MonitoredTask task);
+    Task UpdateMonitoredTaskAsync(MonitoredTask task);
+    Task<List<MonitoredTask>> GetDueMonitoredTasksAsync(DateTime utcNow, int batchSize = 50);
+    Task<TaskSession?> GetActiveTaskSessionByChannelAsync(ulong channelId);
 }
 

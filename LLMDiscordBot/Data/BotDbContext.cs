@@ -20,6 +20,10 @@ public class BotDbContext : DbContext
     public DbSet<GuildAdmin> GuildAdmins { get; set; } = null!;
     public DbSet<UserPreferences> UserPreferences { get; set; } = null!;
     public DbSet<InteractionLog> InteractionLogs { get; set; } = null!;
+    public DbSet<TaskSession> TaskSessions { get; set; } = null!;
+    public DbSet<TaskPlanStep> TaskPlanSteps { get; set; } = null!;
+    public DbSet<ActionApprovalLog> ActionApprovalLogs { get; set; } = null!;
+    public DbSet<MonitoredTask> MonitoredTasks { get; set; } = null!;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -106,6 +110,70 @@ public class BotDbContext : DbContext
             entity.HasIndex(e => e.GuildId);
             entity.HasIndex(e => e.CommandType);
             entity.HasIndex(e => e.Timestamp);
+        });
+
+        // TaskSession entity configuration
+        modelBuilder.Entity<TaskSession>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Status)
+                .HasConversion<string>()
+                .HasMaxLength(50);
+            entity.HasIndex(e => new { e.UserId, e.GuildId, e.Status, e.IsArchived });
+            entity.HasIndex(e => e.UpdatedAt);
+            entity.Property(e => e.ApprovalPolicy).HasMaxLength(50);
+            entity.Property(e => e.AllowedWebsites).HasMaxLength(1000);
+            entity.Property(e => e.MemoryControllerKey).HasMaxLength(200);
+            entity.HasMany(e => e.Steps)
+                .WithOne(e => e.Session)
+                .HasForeignKey(e => e.TaskSessionId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasMany(e => e.ApprovalLogs)
+                .WithOne(e => e.Session)
+                .HasForeignKey(e => e.TaskSessionId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.Monitor)
+                .WithOne(e => e.Session)
+                .HasForeignKey<MonitoredTask>(e => e.TaskSessionId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // TaskPlanStep entity configuration
+        modelBuilder.Entity<TaskPlanStep>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Status)
+                .HasConversion<string>()
+                .HasMaxLength(50);
+            entity.HasIndex(e => new { e.TaskSessionId, e.SequenceNumber });
+            entity.HasIndex(e => e.Status);
+            entity.Property(e => e.ToolName).HasMaxLength(100);
+            entity.HasMany(e => e.ApprovalLogs)
+                .WithOne(e => e.Step)
+                .HasForeignKey(e => e.TaskPlanStepId)
+                .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        // ActionApprovalLog entity configuration
+        modelBuilder.Entity<ActionApprovalLog>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Status)
+                .HasConversion<string>()
+                .HasMaxLength(50);
+            entity.HasIndex(e => new { e.TaskSessionId, e.Status });
+            entity.HasIndex(e => new { e.RequestedBy, e.Status });
+            entity.HasIndex(e => new { e.ApproverUserId, e.Status });
+        });
+
+        // MonitoredTask entity configuration
+        modelBuilder.Entity<MonitoredTask>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Status)
+                .HasConversion<string>()
+                .HasMaxLength(50);
+            entity.HasIndex(e => new { e.Status, e.NextCheckAt });
         });
 
         // Seed default settings

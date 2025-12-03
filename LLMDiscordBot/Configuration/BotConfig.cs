@@ -14,14 +14,30 @@ public class DiscordConfig
 public class LLMConfig
 {
     public string ApiEndpoint { get; set; } = string.Empty;
-    public string Model { get; set; }
+    public string ApiKey { get; set; } = string.Empty;
+    public string Model { get; set; } = string.Empty;
     public double Temperature { get; set; } = 0.7;
     public int MaxTokens { get; set; } = 2000;
-    public string SystemPrompt { get; set; }
-    public string BotName { get; set; }
-    public string RoleBackground { get; set; }
-    public string LanguagePreference { get; set; }
-    public string StyleDescription { get; set; }
+    public string SystemPrompt { get; set; } = string.Empty;
+    public string BotName { get; set; } = string.Empty;
+    public string RoleBackground { get; set; } = string.Empty;
+    public string LanguagePreference { get; set; } = string.Empty;
+    public string StyleDescription { get; set; } = string.Empty;
+    public string? DefaultReasoningEffort { get; set; }
+    public List<LLMEndpointConfig> FallbackModels { get; set; } = new();
+    public LLMEndpointConfig? ActionGuardClient { get; set; }
+    public LLMEndpointConfig? TaskClient { get; set; }
+}
+
+public class LLMEndpointConfig()
+{
+    public string ApiEndpoint { get; set; } = string.Empty;
+    public string ApiKey { get; set; } = string.Empty;
+    public string Model { get; set; } = string.Empty;
+    public double? Temperature { get; set; }
+    public int? MaxTokens { get; set; }
+    public string? ReasoningEffort { get; set; }
+    public string? FriendlyName { get; set; }
 }
 
 /// <summary>

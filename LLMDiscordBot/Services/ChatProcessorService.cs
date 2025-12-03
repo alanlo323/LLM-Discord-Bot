@@ -20,10 +20,12 @@ public class ChatProcessorService(
     HabitLearningService habitLearning,
     GraphMemoryService graphMemoryService,
     MemoryExtractionBackgroundService memoryExtractionService,
+    TaskOrchestrationService taskOrchestration,
     IOptions<GraphRagConfig> graphRagConfig,
     ILogger logger)
 {
     private readonly MemoryExtractionConfig memoryConfig = graphRagConfig.Value.MemoryExtraction;
+    private readonly TaskOrchestrationService orchestrationService = taskOrchestration;
 
     /// <summary>
     /// Process a chat request and stream the response
@@ -294,6 +296,20 @@ public class ChatProcessorService(
             }
 
             var totalTokens = (promptTokens ?? 0) + (completionTokens ?? 0);
+
+            try
+            {
+                var activeSession = await repository.GetActiveTaskSessionByChannelAsync(channelId);
+                if (activeSession != null)
+                {
+                    await orchestrationService.AppendConversationSnapshotAsync(activeSession.Id, message, response);
+                    logger.Debug("Conversation appended to session {SessionId}", activeSession.Id);
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.Warning(ex, "Failed to append conversation snapshot to active plan");
+            }
 
             // Update final reasoning message if it exists
             if (reasoningMessage != null && reasoningBuilder.Length > 0 && !interactionTimedOut)

@@ -21,5 +21,6 @@ public class User
     // Navigation properties
     public virtual ICollection<TokenUsage> TokenUsages { get; set; } = new List<TokenUsage>();
     public virtual ICollection<ChatHistory> ChatHistories { get; set; } = new List<ChatHistory>();
+    public virtual ICollection<TaskSession> TaskSessions { get; set; } = new List<TaskSession>();
 }
 

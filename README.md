@@ -64,8 +64,8 @@ dotnet user-secrets set "Discord:Token" "YOUR_DISCORD_BOT_TOKEN"
 # 或者直接編輯 appsettings.json（不推薦提交到 Git）
 ```
 
-4. （可選）修改 LLM 設定（已預設為 `https://lmstudio.alanlo.org/v1`）：
-編輯 `appsettings.json` 中的 `LLM` 區段
+4. （可選）修改 LLM 設定（預設聊天模型為 `gpt-oss-20b`，Task 指令使用 `TaskClient` 中的 Fara-7B）：
+編輯 `appsettings.json` 中的 `LLM` 區段，並視需求調整 `TaskClient`（Fara-7B）或 `TaskClient.ApiKey`。
 
 ⚠️ **重要安全提醒**：
 - `appsettings.json` 已加入 `.gitignore`，不會被追蹤
@@ -158,6 +158,21 @@ Bot 會學習並適應您的使用習慣，提供個性化的回答體驗。
 - 🎨 完全自訂的回答體驗
 
 詳細說明請參考 [PERSONALIZATION_FEATURES.md](PERSONALIZATION_FEATURES.md)
+
+### Magentic-UI 任務協作指令
+
+- `/task plan-start`：建立新的共規劃任務，設定允許網站與審批策略
+- `/task plan-list`：列出最近的計畫與狀態
+- `/task plan-show`：檢視計畫細節與步驟
+- `/task plan-add-step`：新增步驟並標記是否需要審批
+- `/task plan-status`：切換計畫狀態（Draft、Ready、Executing、Monitoring...）
+- `/task plan-archive`：封存已完成或取消的計畫
+- `/task autorun`：輸入任務描述，由系統自動規劃步驟並串流執行，預設套用 Action Guard，可設定 `allowed_websites`、`approval_policy`、`max_steps`、`auto_approve` 等參數
+- `/task approval-pending`：查看等待您審批的動作
+- `/task approval-resolve`：在 Discord 直接核准或拒絕待審批項目
+
+任務協作流程會自動記錄在 `TaskSessions`/`TaskPlanSteps` 表內，並由背景的 `TaskMonitoringService` 定期檢查長期監控任務。
+> `/task` 指令使用 `LLM.TaskClient`（預設為 Fara-7B），而 `/chat` 等一般對話仍維持在 `gpt-oss-20b`，確保互動品質與成本平衡。
 
 ### 管理員命令
 

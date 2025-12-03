@@ -739,5 +739,170 @@ public class Repository(BotDbContext context, ILogger logger) : IRepository
     }
 
     #endregion
+
+    #region Task Orchestration Operations
+
+    public async Task<TaskSession?> GetTaskSessionAsync(Guid sessionId)
+    {
+        var session = await context.TaskSessions
+            .Include(s => s.Steps)
+            .Include(s => s.ApprovalLogs)
+            .Include(s => s.Monitor)
+            .FirstOrDefaultAsync(s => s.Id == sessionId);
+
+        if (session != null && session.Steps.Any())
+        {
+            session.Steps = session.Steps
+                .OrderBy(step => step.SequenceNumber)
+                .ToList();
+        }
+
+        return session;
+    }
+
+    public async Task<List<TaskSession>> GetUserTaskSessionsAsync(ulong userId, int count, bool includeArchived = false)
+    {
+        var query = context.TaskSessions
+            .Where(s => s.UserId == userId);
+
+        if (!includeArchived)
+        {
+            query = query.Where(s => !s.IsArchived);
+        }
+
+        return await query
+            .OrderByDescending(s => s.UpdatedAt)
+            .Take(count)
+            .AsNoTracking()
+            .ToListAsync();
+    }
+
+    public async Task<TaskSession> AddTaskSessionAsync(TaskSession session)
+    {
+        session.CreatedAt = DateTime.UtcNow;
+        session.UpdatedAt = DateTime.UtcNow;
+        context.TaskSessions.Add(session);
+        await context.SaveChangesAsync();
+        logger.Information("Created task session {SessionId} for user {UserId}", session.Id, session.UserId);
+        return session;
+    }
+
+    public async Task UpdateTaskSessionAsync(TaskSession session)
+    {
+        session.UpdatedAt = DateTime.UtcNow;
+        context.TaskSessions.Update(session);
+        await context.SaveChangesAsync();
+        logger.Debug("Updated task session {SessionId} status {Status}", session.Id, session.Status);
+    }
+
+    public async Task<List<TaskPlanStep>> GetTaskPlanStepsAsync(Guid sessionId)
+    {
+        return await context.TaskPlanSteps
+            .Where(step => step.TaskSessionId == sessionId)
+            .OrderBy(step => step.SequenceNumber)
+            .ToListAsync();
+    }
+
+    public async Task<TaskPlanStep?> GetTaskPlanStepAsync(Guid stepId)
+    {
+        return await context.TaskPlanSteps
+            .Include(step => step.ApprovalLogs)
+            .FirstOrDefaultAsync(step => step.Id == stepId);
+    }
+
+    public async Task AddTaskPlanStepAsync(TaskPlanStep step)
+    {
+        context.TaskPlanSteps.Add(step);
+        await context.SaveChangesAsync();
+        logger.Information("Added step {StepId} (seq {Sequence}) to session {SessionId}", step.Id, step.SequenceNumber, step.TaskSessionId);
+    }
+
+    public async Task UpdateTaskPlanStepAsync(TaskPlanStep step)
+    {
+        context.TaskPlanSteps.Update(step);
+        await context.SaveChangesAsync();
+        logger.Debug("Updated step {StepId} status {Status}", step.Id, step.Status);
+    }
+
+    public async Task<ActionApprovalLog?> GetApprovalLogAsync(Guid approvalId)
+    {
+        return await context.ActionApprovalLogs
+            .FirstOrDefaultAsync(log => log.Id == approvalId);
+    }
+
+    public async Task<ActionApprovalLog> AddApprovalLogAsync(ActionApprovalLog log)
+    {
+        context.ActionApprovalLogs.Add(log);
+        await context.SaveChangesAsync();
+        logger.Information("Created approval request {ApprovalId} for session {SessionId}", log.Id, log.TaskSessionId);
+        return log;
+    }
+
+    public async Task UpdateApprovalLogAsync(ActionApprovalLog log)
+    {
+        context.ActionApprovalLogs.Update(log);
+        await context.SaveChangesAsync();
+        logger.Debug("Updated approval {ApprovalId} status {Status}", log.Id, log.Status);
+    }
+
+    public async Task<List<ActionApprovalLog>> GetPendingApprovalsAsync(ulong approverUserId, int count = 20)
+    {
+        return await context.ActionApprovalLogs
+            .Where(log => log.ApproverUserId == approverUserId && log.Status == ActionApprovalStatus.Pending)
+            .OrderBy(log => log.RequestedAt)
+            .Take(count)
+            .AsNoTracking()
+            .ToListAsync();
+    }
+
+    public async Task<MonitoredTask?> GetMonitoredTaskAsync(Guid monitorId)
+    {
+        return await context.MonitoredTasks
+            .FirstOrDefaultAsync(task => task.Id == monitorId);
+    }
+
+    public async Task AddMonitoredTaskAsync(MonitoredTask task)
+    {
+        task.CreatedAt = DateTime.UtcNow;
+        task.UpdatedAt = DateTime.UtcNow;
+        context.MonitoredTasks.Add(task);
+        await context.SaveChangesAsync();
+        logger.Information("Created monitor {MonitorId} for session {SessionId}", task.Id, task.TaskSessionId);
+    }
+
+    public async Task UpdateMonitoredTaskAsync(MonitoredTask task)
+    {
+        task.UpdatedAt = DateTime.UtcNow;
+        context.MonitoredTasks.Update(task);
+        await context.SaveChangesAsync();
+        logger.Debug("Updated monitor {MonitorId} status {Status}", task.Id, task.Status);
+    }
+
+    public async Task<List<MonitoredTask>> GetDueMonitoredTasksAsync(DateTime utcNow, int batchSize = 50)
+    {
+        return await context.MonitoredTasks
+            .Where(task =>
+                task.NextCheckAt <= utcNow &&
+                (task.Status == MonitoringStatus.Pending || task.Status == MonitoringStatus.Active || task.Status == MonitoringStatus.Waiting))
+            .OrderBy(task => task.NextCheckAt)
+            .Take(batchSize)
+            .AsNoTracking()
+            .ToListAsync();
+    }
+
+    public async Task<TaskSession?> GetActiveTaskSessionByChannelAsync(ulong channelId)
+    {
+        return await context.TaskSessions
+            .Where(session =>
+                session.ChannelId == channelId &&
+                !session.IsArchived &&
+                (session.Status == TaskSessionStatus.Executing ||
+                 session.Status == TaskSessionStatus.WaitingApproval ||
+                 session.Status == TaskSessionStatus.Monitoring))
+            .OrderByDescending(session => session.UpdatedAt)
+            .FirstOrDefaultAsync();
+    }
+
+    #endregion
 }
 

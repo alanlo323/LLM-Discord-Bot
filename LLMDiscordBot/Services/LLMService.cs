@@ -15,8 +15,9 @@ namespace LLMDiscordBot.Services;
 /// </summary>
 public class LLMService
 {
-    private readonly Kernel kernel;
-    private readonly IChatCompletionService chatService;
+    private readonly List<ChatClientDescriptor> chatClients = new();
+    private readonly ChatClientDescriptor actionGuardClient;
+    private readonly ChatClientDescriptor? taskClient;
     private readonly ILogger logger;
     private readonly LLMConfig config;
     private readonly IRepository repository;
@@ -32,22 +33,44 @@ public class LLMService
         this.logger = logger;
         this.repository = repository;
 
-        // Build kernel with OpenAI-compatible endpoint
-        var builder = Kernel.CreateBuilder();
-        
-        builder.AddOpenAIChatCompletion(
-            modelId: this.config.Model,
-            apiKey: "not-needed", // LM Studio doesn't require an API key
-            endpoint: new Uri(this.config.ApiEndpoint)
-        );
+        // Build primary Fara-7B client plus optional fallbacks
+        var primaryEndpoint = new LLMEndpointConfig
+        {
+            ApiEndpoint = this.config.ApiEndpoint,
+            ApiKey = this.config.ApiKey,
+            Model = this.config.Model,
+            Temperature = this.config.Temperature,
+            MaxTokens = this.config.MaxTokens,
+            ReasoningEffort = this.config.DefaultReasoningEffort,
+            FriendlyName = "primary"
+        };
 
-        this.kernel = builder.Build();
-        
-        // Register Tavily search plugin
-        this.kernel.Plugins.AddFromObject(tavilySearchPlugin, "TavilySearch");
-        this.logger.Information("Tavily search plugin registered to kernel");
-        
-        this.chatService = this.kernel.GetRequiredService<IChatCompletionService>();
+        var primaryClient = CreateChatClient("primary", primaryEndpoint, tavilySearchPlugin);
+        this.chatClients.Add(primaryClient);
+
+        if (this.config.FallbackModels?.Count > 0)
+        {
+            var index = 0;
+            foreach (var fallback in this.config.FallbackModels)
+            {
+                var descriptor = CreateChatClient($"fallback_{index}", fallback, tavilySearchPlugin);
+                this.chatClients.Add(descriptor);
+                index++;
+            }
+        }
+
+        this.actionGuardClient = this.config.ActionGuardClient != null
+            ? CreateChatClient("action_guard", this.config.ActionGuardClient, tavilySearchPlugin)
+            : primaryClient;
+        this.logger.Information("Action guard client resolved to {Client}", this.actionGuardClient.DisplayName);
+
+        if (this.config.TaskClient != null)
+        {
+            this.taskClient = CreateChatClient("task_client", this.config.TaskClient, tavilySearchPlugin);
+            this.logger.Information("Task command client resolved to {Client}", this.taskClient.DisplayName);
+        }
+
+        this.logger.Information("Initialized {PrimaryModel} with {FallbackCount} fallback client(s)", primaryClient.Config.Model, this.chatClients.Count - 1);
 
         // Initialize SharpToken encoding for accurate token counting
         try
@@ -66,309 +89,73 @@ public class LLMService
     }
 
     /// <summary>
-    /// Get chat completion from LLM
+    /// Get chat completion from default LLM pipeline (gpt-oss-20b)
     /// </summary>
-    public async Task<(string response, int promptTokens, int completionTokens)> GetChatCompletionAsync(
+    public Task<(string response, int promptTokens, int completionTokens)> GetChatCompletionAsync(
         Microsoft.SemanticKernel.ChatCompletion.ChatHistory chatHistory,
         ulong? guildId = null,
         CancellationToken cancellationToken = default)
     {
-        // Apply default timeout of 5 minutes if no cancellation token provided
-        using var timeoutCts = new CancellationTokenSource(TimeSpan.FromMinutes(5));
-        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token);
-        
-        try
-        {
-            // Get settings from database if available
-            var modelSetting = await repository.GetSettingAsync("Model");
-            var temperatureSetting = await repository.GetSettingAsync("Temperature");
-            var globalMaxTokensSetting = await repository.GetSettingAsync("GlobalMaxTokens");
-
-            var temperature = double.TryParse(temperatureSetting, out var temp) ? temp : config.Temperature;
-            var maxTokens = int.TryParse(globalMaxTokensSetting, out var max) ? max : config.MaxTokens;
-
-            // Check for guild-specific MaxTokens override
-            if (guildId.HasValue)
-            {
-                var guildSettings = await repository.GetGuildSettingsAsync(guildId.Value);
-                if (guildSettings?.MaxTokens.HasValue == true)
-                {
-                    maxTokens = Math.Min(maxTokens, guildSettings.MaxTokens.Value);
-                }
-            }
-
-            var executionSettings = new OpenAIPromptExecutionSettings
-            {
-                Temperature = temperature,
-                MaxTokens = maxTokens,
-                ToolCallBehavior = ToolCallBehavior.AutoInvokeKernelFunctions
-            };
-
-            logger.Debug("Sending request to LLM with {MessageCount} messages (Auto function calling enabled)", chatHistory.Count);
-
-            var result = await chatService.GetChatMessageContentsAsync(
+        return ExecuteChatCompletionAsync(
+            chatClients,
                 chatHistory,
-                executionSettings,
-                kernel,
-                linkedCts.Token);
-
-            // Extract token usage from metadata
-            var promptTokens = 0;
-            var completionTokens = 0;
-
-            if (result != null && result.Count > 0)
-            {
-                var lastMessage = result[result.Count - 1];
-                if (lastMessage.Metadata != null &&
-                    lastMessage.Metadata.TryGetValue("Usage", out var usageObj))
-                {
-                    logger.Debug("Usage object type: {Type}", usageObj?.GetType().FullName ?? "null");
-                    
-                    // Try to parse usage information
-                    if (usageObj is IDictionary<string, object> usageDict)
-                    {
-                        // Dictionary approach (for some API implementations)
-                        if (usageDict.TryGetValue("prompt_tokens", out var pt))
-                            promptTokens = Convert.ToInt32(pt);
-                        else if (usageDict.TryGetValue("PromptTokens", out var pt2))
-                            promptTokens = Convert.ToInt32(pt2);
-
-                        if (usageDict.TryGetValue("completion_tokens", out var ct))
-                            completionTokens = Convert.ToInt32(ct);
-                        else if (usageDict.TryGetValue("CompletionTokens", out var ct2))
-                            completionTokens = Convert.ToInt32(ct2);
-                    }
-                    else if (usageObj is not null)
-                    {
-                        // Use reflection to get properties (for OpenAI.Chat.ChatTokenUsage and similar types)
-                        var usageType = usageObj.GetType();
-                        
-                        // Try to get InputTokenCount or PromptTokens
-                        var inputTokenProp = usageType.GetProperty("InputTokenCount") 
-                            ?? usageType.GetProperty("PromptTokens")
-                            ?? usageType.GetProperty("prompt_tokens");
-                        if (inputTokenProp != null)
-                        {
-                            var value = inputTokenProp.GetValue(usageObj);
-                            if (value != null)
-                                promptTokens = Convert.ToInt32(value);
-                        }
-                        
-                        // Try to get OutputTokenCount or CompletionTokens
-                        var outputTokenProp = usageType.GetProperty("OutputTokenCount")
-                            ?? usageType.GetProperty("CompletionTokens")
-                            ?? usageType.GetProperty("completion_tokens");
-                        if (outputTokenProp != null)
-                        {
-                            var value = outputTokenProp.GetValue(usageObj);
-                            if (value != null)
-                                completionTokens = Convert.ToInt32(value);
-                        }
-                        
-                        logger.Debug("Token extraction via reflection - Prompt: {PromptTokens}, Completion: {CompletionTokens}", 
-                            promptTokens, completionTokens);
-                    }
-                    else
-                    {
-                        logger.Warning("Usage metadata is null");
-                    }
-                }
-                else
-                {
-                    logger.Warning("No Usage metadata found in LLM response");
-                }
-
-                var responseContent = string.Join("", result.Select(r => r.Content));
-                logger.Information("LLM response received. Prompt tokens: {PromptTokens}, Completion tokens: {CompletionTokens}",
-                    promptTokens, completionTokens);
-
-                return (responseContent ?? "", promptTokens, completionTokens);
-            }
-
-            return ("", 0, 0);
-        }
-        catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested)
-        {
-            logger.Error("LLM request timed out after 5 minutes");
-            throw new TimeoutException("LLM request timed out after 5 minutes");
-        }
-        catch (Exception ex)
-        {
-            logger.Error(ex, "Error getting chat completion from LLM");
-            throw;
-        }
+            guildId,
+            config.DefaultReasoningEffort,
+            TimeSpan.FromMinutes(5),
+            cancellationToken);
     }
 
     /// <summary>
-    /// Get chat completion from LLM with streaming support
+    /// Get chat completion using TaskCommands pipeline (Fara-7B first, fallback to defaults)
     /// </summary>
-    public async IAsyncEnumerable<(string content, string? reasoning, int? promptTokens, int? completionTokens)> GetChatCompletionStreamingAsync(
+    public Task<(string response, int promptTokens, int completionTokens)> GetTaskChatCompletionAsync(
+        Microsoft.SemanticKernel.ChatCompletion.ChatHistory chatHistory,
+        ulong? guildId = null,
+        CancellationToken cancellationToken = default)
+    {
+        return ExecuteChatCompletionAsync(
+            GetTaskClientPipeline(),
+            chatHistory,
+            guildId,
+            config.TaskClient?.ReasoningEffort ?? config.DefaultReasoningEffort,
+            TimeSpan.FromMinutes(5),
+            cancellationToken);
+    }
+
+    /// <summary>
+    /// Stream chat completion from default pipeline
+    /// </summary>
+    public IAsyncEnumerable<(string content, string? reasoning, int? promptTokens, int? completionTokens)> GetChatCompletionStreamingAsync(
         Microsoft.SemanticKernel.ChatCompletion.ChatHistory chatHistory,
         ulong? guildId = null,
         string? reasoningEffort = null,
-        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default)
     {
-        // Apply default timeout of 10 minutes for streaming (longer than non-streaming)
-        using var timeoutCts = new CancellationTokenSource(TimeSpan.FromMinutes(10));
-        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token);
-
-        IAsyncEnumerator<(string content, string? reasoning, int? promptTokens, int? completionTokens)>? enumerator = null;
-        
-        try
-        {
-            enumerator = GetChatCompletionStreamingInternalAsync(chatHistory, guildId, reasoningEffort, linkedCts.Token).GetAsyncEnumerator(linkedCts.Token);
-            
-            while (true)
-            {
-                bool hasNext;
-                try
-                {
-                    hasNext = await enumerator.MoveNextAsync();
-                }
-                catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested)
-                {
-                    logger.Error("LLM streaming request timed out after 10 minutes");
-                    throw new TimeoutException("LLM streaming request timed out after 10 minutes");
-                }
-                
-                if (!hasNext)
-                    break;
-                    
-                yield return enumerator.Current;
-            }
-        }
-        finally
-        {
-            if (enumerator != null)
-            {
-                await enumerator.DisposeAsync();
-            }
-        }
+        return ExecuteStreamingCompletionAsync(
+            chatClients,
+            chatHistory,
+            guildId,
+            reasoningEffort ?? config.DefaultReasoningEffort,
+            TimeSpan.FromMinutes(10),
+            cancellationToken);
     }
 
     /// <summary>
-    /// Internal method for streaming chat completion
+    /// Stream chat completion using TaskCommands (Fara-first) pipeline
     /// </summary>
-    private async IAsyncEnumerable<(string content, string? reasoning, int? promptTokens, int? completionTokens)> GetChatCompletionStreamingInternalAsync(
+    public IAsyncEnumerable<(string content, string? reasoning, int? promptTokens, int? completionTokens)> GetTaskChatCompletionStreamingAsync(
         Microsoft.SemanticKernel.ChatCompletion.ChatHistory chatHistory,
-        ulong? guildId,
-        string? reasoningEffort,
-        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
+        ulong? guildId = null,
+        string? reasoningEffort = null,
+        CancellationToken cancellationToken = default)
     {
-        int? promptTokens = null;
-        int? completionTokens = null;
-        string? reasoning = null;
-
-        // Get settings from database if available
-        var temperatureSetting = await repository.GetSettingAsync("Temperature");
-        var globalMaxTokensSetting = await repository.GetSettingAsync("GlobalMaxTokens");
-
-        var temperature = double.TryParse(temperatureSetting, out var temp) ? temp : config.Temperature;
-        var maxTokens = int.TryParse(globalMaxTokensSetting, out var max) ? max : config.MaxTokens;
-
-        // Check for guild-specific MaxTokens override
-        if (guildId.HasValue)
-        {
-            var guildSettings = await repository.GetGuildSettingsAsync(guildId.Value);
-            if (guildSettings?.MaxTokens.HasValue == true)
-            {
-                maxTokens = Math.Min(maxTokens, guildSettings.MaxTokens.Value);
-            }
-        }
-
-        var executionSettings = new OpenAIPromptExecutionSettings
-        {
-            Temperature = temperature,
-            MaxTokens = maxTokens,
-            ToolCallBehavior = ToolCallBehavior.AutoInvokeKernelFunctions
-        };
-
-        // Add reasoning_effort parameter if specified
-        if (!string.IsNullOrEmpty(reasoningEffort))
-        {
-            executionSettings.ExtensionData = new Dictionary<string, object>
-            {
-                ["reasoning_effort"] = reasoningEffort
-            };
-            logger.Debug("Added reasoning_effort parameter: {ReasoningEffort}", reasoningEffort);
-        }
-
-        logger.Debug("Sending streaming request to LLM with {MessageCount} messages (Auto function calling enabled)", chatHistory.Count);
-
-        await foreach (var message in chatService.GetStreamingChatMessageContentsAsync(
+        return ExecuteStreamingCompletionAsync(
+            GetTaskClientPipeline(),
             chatHistory,
-            executionSettings,
-            kernel,
-            cancellationToken))
-        {
-            // Try to extract metadata if available
-            if (message.Metadata != null)
-            {
-                // Extract token usage
-                if (message.Metadata.TryGetValue("Usage", out var usageObj))
-                {
-                    if (usageObj is IDictionary<string, object> usageDict)
-                    {
-                        if (usageDict.TryGetValue("prompt_tokens", out var pt))
-                            promptTokens = Convert.ToInt32(pt);
-                        else if (usageDict.TryGetValue("PromptTokens", out var pt2))
-                            promptTokens = Convert.ToInt32(pt2);
-
-                        if (usageDict.TryGetValue("completion_tokens", out var ct))
-                            completionTokens = Convert.ToInt32(ct);
-                        else if (usageDict.TryGetValue("CompletionTokens", out var ct2))
-                            completionTokens = Convert.ToInt32(ct2);
-                    }
-                    else if (usageObj is not null)
-                    {
-                        var usageType = usageObj.GetType();
-                        
-                        var inputTokenProp = usageType.GetProperty("InputTokenCount") 
-                            ?? usageType.GetProperty("PromptTokens")
-                            ?? usageType.GetProperty("prompt_tokens");
-                        if (inputTokenProp != null)
-                        {
-                            var value = inputTokenProp.GetValue(usageObj);
-                            if (value != null)
-                                promptTokens = Convert.ToInt32(value);
-                        }
-                        
-                        var outputTokenProp = usageType.GetProperty("OutputTokenCount")
-                            ?? usageType.GetProperty("CompletionTokens")
-                            ?? usageType.GetProperty("completion_tokens");
-                        if (outputTokenProp != null)
-                        {
-                            var value = outputTokenProp.GetValue(usageObj);
-                            if (value != null)
-                                completionTokens = Convert.ToInt32(value);
-                        }
-                    }
-                }
-
-                // Extract reasoning content if available
-                if (message.Metadata.TryGetValue("Reasoning", out var reasoningObj))
-                {
-                    reasoning = reasoningObj?.ToString();
-                    if (!string.IsNullOrEmpty(reasoning))
-                    {
-                        logger.Debug("Received reasoning content: {Length} characters", reasoning.Length);
-                    }
-                }
-                else if (message.Metadata.TryGetValue("reasoning", out var reasoningObj2))
-                {
-                    reasoning = reasoningObj2?.ToString();
-                    if (!string.IsNullOrEmpty(reasoning))
-                    {
-                        logger.Debug("Received reasoning content: {Length} characters", reasoning.Length);
-                    }
-                }
-            }
-
-            yield return (message.Content ?? "", reasoning, promptTokens, completionTokens);
-        }
-
-        logger.Information("LLM streaming response completed. Prompt tokens: {PromptTokens}, Completion tokens: {CompletionTokens}",
-            promptTokens ?? 0, completionTokens ?? 0);
+            guildId,
+            reasoningEffort ?? config.TaskClient?.ReasoningEffort ?? config.DefaultReasoningEffort,
+            TimeSpan.FromMinutes(10),
+            cancellationToken);
     }
 
     /// <summary>
@@ -564,6 +351,368 @@ public class LLMService
         
         return contextBuilder.ToString();
     }
+
+    private async Task<(string response, int promptTokens, int completionTokens)> ExecuteChatCompletionAsync(
+        IEnumerable<ChatClientDescriptor> clientPipeline,
+        Microsoft.SemanticKernel.ChatCompletion.ChatHistory chatHistory,
+        ulong? guildId,
+        string? reasoningEffort,
+        TimeSpan timeout,
+        CancellationToken cancellationToken)
+    {
+        var (temperature, maxTokens) = await ResolveGenerationParametersAsync(guildId);
+        using var timeoutCts = new CancellationTokenSource(timeout);
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token);
+
+        Exception? lastError = null;
+
+        foreach (var client in clientPipeline)
+        {
+            try
+            {
+                var executionSettings = CreateExecutionSettings(client, temperature, maxTokens, reasoningEffort);
+                logger.Debug("Sending request via {Client} with {MessageCount} messages", client.DisplayName, chatHistory.Count);
+
+                var result = await client.ChatService.GetChatMessageContentsAsync(
+                    chatHistory,
+                    executionSettings,
+                    client.Kernel,
+                    linkedCts.Token);
+
+                var (promptTokens, completionTokens) = ExtractTokenUsage(result?.Count > 0 ? result[^1] : null);
+                var responseContent = CombineResponseContent(result);
+
+                logger.Information(
+                    "LLM response from {Client}. Prompt tokens: {PromptTokens}, Completion tokens: {CompletionTokens}",
+                    client.DisplayName,
+                    promptTokens,
+                    completionTokens);
+
+                return (responseContent, promptTokens, completionTokens);
+            }
+            catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested)
+            {
+                logger.Error("LLM request timed out after {Minutes} minutes", timeout.TotalMinutes);
+                throw new TimeoutException($"LLM request timed out after {timeout.TotalMinutes} minutes");
+            }
+            catch (Exception ex)
+            {
+                lastError = ex;
+                logger.Warning(ex, "LLM request failed via {Client}, attempting fallback", client.DisplayName);
+            }
+        }
+
+        logger.Error(lastError, "All configured LLM endpoints failed");
+        throw lastError ?? new InvalidOperationException("Unable to reach any LLM endpoint");
+    }
+
+    private async IAsyncEnumerable<(string content, string? reasoning, int? promptTokens, int? completionTokens)> ExecuteStreamingCompletionAsync(
+        IEnumerable<ChatClientDescriptor> clientPipeline,
+        Microsoft.SemanticKernel.ChatCompletion.ChatHistory chatHistory,
+        ulong? guildId,
+        string? reasoningEffort,
+        TimeSpan timeout,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        var (temperature, maxTokens) = await ResolveGenerationParametersAsync(guildId);
+        using var timeoutCts = new CancellationTokenSource(timeout);
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timeoutCts.Token);
+
+        Exception? lastError = null;
+
+        foreach (var client in clientPipeline)
+        {
+            var yieldedAny = false;
+            Exception? streamException = null;
+            var executionSettings = CreateExecutionSettings(client, temperature, maxTokens, reasoningEffort);
+            var enumerator = StreamFromClientAsync(
+                client,
+                chatHistory,
+                executionSettings,
+                linkedCts.Token).GetAsyncEnumerator(linkedCts.Token);
+
+            try
+            {
+                while (true)
+                {
+                    bool hasNext;
+                    try
+                    {
+                        hasNext = await enumerator.MoveNextAsync();
+                    }
+                    catch (Exception ex)
+                    {
+                        streamException = ex;
+                        break;
+                    }
+
+                    if (!hasNext)
+                    {
+                        streamException = null;
+                        break;
+                    }
+
+                    yieldedAny = true;
+                    yield return enumerator.Current;
+                }
+            }
+            finally
+            {
+                await enumerator.DisposeAsync();
+            }
+
+            if (streamException == null)
+            {
+                yield break;
+            }
+
+            if (streamException is OperationCanceledException && timeoutCts.IsCancellationRequested)
+            {
+                logger.Error("LLM streaming request timed out after {Minutes} minutes", timeout.TotalMinutes);
+                throw new TimeoutException($"LLM streaming request timed out after {timeout.TotalMinutes} minutes");
+            }
+
+            if (yieldedAny)
+            {
+                logger.Error(streamException, "Streaming failed mid-response via {Client}", client.DisplayName);
+                throw streamException;
+            }
+
+            lastError = streamException;
+            logger.Warning(streamException, "Streaming failed via {Client}, attempting fallback");
+        }
+
+        logger.Error(lastError, "All configured LLM endpoints failed during streaming");
+        throw lastError ?? new InvalidOperationException("Unable to stream from any LLM endpoint");
+    }
+
+    private IEnumerable<ChatClientDescriptor> GetTaskClientPipeline()
+    {
+        if (taskClient != null)
+        {
+            yield return taskClient;
+        }
+
+        foreach (var client in chatClients)
+        {
+            if (taskClient != null && ReferenceEquals(client, taskClient))
+            {
+                continue;
+            }
+
+            yield return client;
+        }
+    }
+
+    private async IAsyncEnumerable<(string content, string? reasoning, int? promptTokens, int? completionTokens)> StreamFromClientAsync(
+        ChatClientDescriptor client,
+        Microsoft.SemanticKernel.ChatCompletion.ChatHistory chatHistory,
+        OpenAIPromptExecutionSettings executionSettings,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        int? promptTokens = null;
+        int? completionTokens = null;
+        string? reasoning = null;
+
+        logger.Debug("Sending streaming request to LLM with {MessageCount} messages (Auto function calling enabled)", chatHistory.Count);
+
+        await foreach (var message in client.ChatService.GetStreamingChatMessageContentsAsync(
+            chatHistory,
+            executionSettings,
+            client.Kernel,
+            cancellationToken))
+        {
+            if (message.Metadata != null)
+            {
+                if (message.Metadata.TryGetValue("Usage", out var usageObj))
+                {
+                    UpdateUsageFromMetadata(usageObj, ref promptTokens, ref completionTokens);
+                }
+
+                if (message.Metadata.TryGetValue("Reasoning", out var reasoningObj) ||
+                    message.Metadata.TryGetValue("reasoning", out reasoningObj))
+                {
+                    reasoning = reasoningObj?.ToString();
+                }
+            }
+
+            yield return (message.Content ?? string.Empty, reasoning, promptTokens, completionTokens);
+        }
+
+        logger.Information("LLM streaming response via {Client} completed. Prompt tokens: {PromptTokens}, Completion tokens: {CompletionTokens}",
+            client.DisplayName,
+            promptTokens ?? 0,
+            completionTokens ?? 0);
+    }
+
+    private async Task<(double temperature, int maxTokens)> ResolveGenerationParametersAsync(ulong? guildId)
+    {
+        var temperatureSetting = await repository.GetSettingAsync("Temperature");
+        var globalMaxTokensSetting = await repository.GetSettingAsync("GlobalMaxTokens");
+
+        var temperature = double.TryParse(temperatureSetting, out var temp) ? temp : config.Temperature;
+        var maxTokens = int.TryParse(globalMaxTokensSetting, out var max) ? max : config.MaxTokens;
+
+        if (guildId.HasValue)
+        {
+            var guildSettings = await repository.GetGuildSettingsAsync(guildId.Value);
+            if (guildSettings?.MaxTokens.HasValue == true)
+            {
+                maxTokens = Math.Min(maxTokens, guildSettings.MaxTokens.Value);
+            }
+        }
+
+        return (temperature, maxTokens);
+    }
+
+    private OpenAIPromptExecutionSettings CreateExecutionSettings(
+        ChatClientDescriptor client,
+        double baseTemperature,
+        int baseMaxTokens,
+        string? reasoningEffort)
+    {
+        var executionSettings = new OpenAIPromptExecutionSettings
+        {
+            Temperature = client.Config.Temperature ?? baseTemperature,
+            MaxTokens = client.Config.MaxTokens ?? baseMaxTokens,
+            ToolCallBehavior = ToolCallBehavior.AutoInvokeKernelFunctions
+        };
+
+        var effectiveReasoning = client.Config.ReasoningEffort ?? reasoningEffort;
+        if (!string.IsNullOrWhiteSpace(effectiveReasoning))
+        {
+            executionSettings.ExtensionData = new Dictionary<string, object>
+            {
+                ["reasoning_effort"] = effectiveReasoning!
+            };
+        }
+
+        return executionSettings;
+    }
+
+    private static string CombineResponseContent(IReadOnlyList<ChatMessageContent>? contents)
+    {
+        if (contents == null || contents.Count == 0)
+        {
+            return string.Empty;
+        }
+
+        return string.Join(string.Empty, contents.Select(r => r.Content));
+    }
+
+    private static (int promptTokens, int completionTokens) ExtractTokenUsage(ChatMessageContent? message)
+    {
+        if (message?.Metadata == null || !message.Metadata.TryGetValue("Usage", out var usageObj))
+        {
+            return (0, 0);
+        }
+
+        int? promptTokens = 0;
+        int? completionTokens = 0;
+        UpdateUsageFromMetadata(usageObj, ref promptTokens, ref completionTokens);
+        return (promptTokens ?? 0, completionTokens ?? 0);
+    }
+
+    private static void UpdateUsageFromMetadata(object? usageObj, ref int? promptTokens, ref int? completionTokens)
+    {
+        if (usageObj is IDictionary<string, object> usageDict)
+        {
+            if (TryGetUsageValue(usageDict, out var promptValue, "prompt_tokens", "PromptTokens"))
+            {
+                promptTokens = Convert.ToInt32(promptValue);
+            }
+
+            if (TryGetUsageValue(usageDict, out var completionValue, "completion_tokens", "CompletionTokens"))
+            {
+                completionTokens = Convert.ToInt32(completionValue);
+            }
+
+            return;
+        }
+
+        if (usageObj is null)
+        {
+            return;
+        }
+
+        var usageType = usageObj.GetType();
+        var inputTokenProp = usageType.GetProperty("InputTokenCount")
+            ?? usageType.GetProperty("PromptTokens")
+            ?? usageType.GetProperty("prompt_tokens");
+        if (inputTokenProp != null)
+        {
+            var value = inputTokenProp.GetValue(usageObj);
+            if (value != null)
+            {
+                promptTokens = Convert.ToInt32(value);
+            }
+        }
+
+        var outputTokenProp = usageType.GetProperty("OutputTokenCount")
+            ?? usageType.GetProperty("CompletionTokens")
+            ?? usageType.GetProperty("completion_tokens");
+        if (outputTokenProp != null)
+        {
+            var value = outputTokenProp.GetValue(usageObj);
+            if (value != null)
+            {
+                completionTokens = Convert.ToInt32(value);
+            }
+        }
+    }
+
+    private static bool TryGetUsageValue(IDictionary<string, object> metadata, out object? value, params string[] keys)
+    {
+        foreach (var key in keys)
+        {
+            if (metadata.TryGetValue(key, out value))
+            {
+                return true;
+            }
+        }
+
+        value = null;
+        return false;
+    }
+
+    private ChatClientDescriptor CreateChatClient(string name, LLMEndpointConfig endpointConfig, TavilySearchPlugin tavilySearchPlugin)
+    {
+        var builder = Kernel.CreateBuilder();
+
+        var resolvedEndpoint = string.IsNullOrWhiteSpace(endpointConfig.ApiEndpoint)
+            ? config.ApiEndpoint
+            : endpointConfig.ApiEndpoint;
+        var resolvedModel = string.IsNullOrWhiteSpace(endpointConfig.Model)
+            ? config.Model
+            : endpointConfig.Model;
+        var resolvedApiKey = string.IsNullOrWhiteSpace(endpointConfig.ApiKey)
+            ? (string.IsNullOrWhiteSpace(config.ApiKey) ? "not-needed" : config.ApiKey)
+            : endpointConfig.ApiKey;
+
+        builder.AddOpenAIChatCompletion(
+            serviceId: name,
+            modelId: resolvedModel,
+            apiKey: resolvedApiKey,
+            endpoint: new Uri(resolvedEndpoint));
+
+        var kernel = builder.Build();
+        kernel.Plugins.AddFromObject(tavilySearchPlugin, "TavilySearch");
+        var chatClient = kernel.GetRequiredService<IChatCompletionService>();
+
+        return new ChatClientDescriptor(
+            name,
+            endpointConfig,
+            endpointConfig.FriendlyName ?? name,
+            kernel,
+            chatClient);
+    }
+
+    private sealed record ChatClientDescriptor(
+        string Name,
+        LLMEndpointConfig Config,
+        string DisplayName,
+        Kernel Kernel,
+        IChatCompletionService ChatService);
 
     /// <summary>
     /// Apply user preferences to execution settings

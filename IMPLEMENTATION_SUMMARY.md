@@ -1,3 +1,48 @@
+# Magentic-UI 交互流程整合 (2025-11-26)
+
+## 功能概述
+- 將 Magentic-UI 的共規劃 / 共執行 / Action Guard / Tell-me-when 概念引入 Discord Bot。
+- 新增任務資料模型（計畫、步驟、審批、監控）與相對應的倉儲方法。
+- 新增 `/task` 指令群組支援計畫建立、步驟管理、狀態切換與審批決策。
+- LLM Service 支援雙管線：一般 `/chat` 走 `gpt-oss-20b`，`/task` 指令透過 `LLM.TaskClient`（Fara-7B）執行，並保留 fallback + Action Guard 模型。
+- 新增 `/task autorun`：輸入描述 → 由 Fara-7B 規劃步驟 → `TaskAutoRunnerService` 自動執行，每個步驟即時更新 Discord Embed、遇到 Action Guard 會等待 `/task approval-resolve`，預設啟用審批。
+
+## 新增檔案
+- `MagenticFlowMapping.md`：Magentic-UI 互動流程與 Discord 對應速查。
+- `LLMDiscordBot/Models/TaskSession.cs`
+- `LLMDiscordBot/Models/TaskPlanStep.cs`
+- `LLMDiscordBot/Models/ActionApprovalLog.cs`
+- `LLMDiscordBot/Models/MonitoredTask.cs`
+- `LLMDiscordBot/Services/TaskOrchestrationService.cs`
+- `LLMDiscordBot/Services/TaskMonitoringService.cs`
+- `LLMDiscordBot/Commands/TaskCommands.cs`
+
+## 重要修改
+- `LLMDiscordBot/Data/BotDbContext.cs`：註冊新 DbSet 與實體設定、索引。
+- `LLMDiscordBot/Data/IRepository.cs`、`Repository.cs`：加入任務、步驟、審批、監控的 CRUD 與查詢。
+- `LLMDiscordBot/Services/LLMService.cs`：重構為多 client 架構，支援 Fara-7B + fallback + action guard，並實作 streaming fallback。
+- `LLMDiscordBot/Services/ChatProcessorService.cs`：串接 `TaskOrchestrationService`，在同頻道執行中的計畫自動附註對話摘要。
+- `LLMDiscordBot/Configuration/BotConfig.cs` / `appsettings*.json`：加入 `ApiKey`、`DefaultReasoningEffort`、`FallbackModels`、`ActionGuardClient`。
+- `LLMDiscordBot/Program.cs`：註冊新的服務與背景監控。
+- `README.md`：新增 Fara-7B 說明與 `/task` 指令章節。
+- `LLMDiscordBot/Migrations/20251126043128_TaskOrchestration*.cs`：資料庫遷移。
+
+## 資料庫變更
+- 新增 `TaskSessions`、`TaskPlanSteps`、`ActionApprovalLogs`、`MonitoredTasks` 四張表。
+- `ActionApprovalLogs` 新增 `ApproverUserId` 與多個索引以支援審批清單查詢。
+
+## 測試步驟
+1. `dotnet ef database update` 套用新遷移。
+2. `dotnet build` 確認建置無誤。
+3. 於 Discord 測試：
+   - `/task plan-start title:"Demo Plan"`
+   - `/task plan-add-step session-id:<ID> title:"蒐集需求" requires-approval:true`
+   - `/task plan-list`、`/task plan-show session-id:<ID>`
+   - `/task approval-pending` / `/task approval-resolve`
+4. 送出 `/chat` 並確認同頻道執行中的計畫會更新 `PlanSnapshot`。
+
+---
+
 # 個性化設定功能實作摘要
 
 ## 完成日期

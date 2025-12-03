@@ -146,6 +146,8 @@ class Program
                 services.AddScoped<TokenControlService>();  // Changed to Scoped - depends on IRepository
                 services.AddScoped<ChatProcessorService>();  // Chat processing service
                 services.AddScoped<HabitLearningService>();  // Habit learning service
+                services.AddScoped<TaskOrchestrationService>();
+                services.AddSingleton<TaskAutoRunnerService>();
                 services.AddSingleton<UserRequestQueueService>();
 
                 // Register GraphRag memory services
@@ -157,6 +159,7 @@ class Program
                 services.AddHostedService<DiscordBotService>();
                 services.AddHostedService<DailyCleanupService>();
                 services.AddHostedService(provider => provider.GetRequiredService<MemoryExtractionBackgroundService>());
+                services.AddHostedService<TaskMonitoringService>();
             });
 
     static IConfiguration BuildConfiguration()
